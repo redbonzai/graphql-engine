@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import ViewHeader from '../TableBrowseRows/ViewHeader';
+import TableHeader from '../TableCommon/TableHeader';
 import { RESET } from '../TableModify/ModifyActions';
 import { findAllFromRel } from '../utils';
 import { getObjArrRelList } from './utils';
@@ -33,6 +33,7 @@ class RelationshipsView extends Component {
       manualRelAdd,
       currentSchema,
       migrationMode,
+      readOnlyMode,
       schemaList,
     } = this.props;
     const styles = require('../TableModify/ModifyTable.scss');
@@ -135,12 +136,12 @@ class RelationshipsView extends Component {
 
     return (
       <div className={`${styles.container} container-fluid`}>
-        <ViewHeader
+        <TableHeader
           dispatch={dispatch}
-          tableName={tableName}
+          table={tableSchema}
           tabName="relationships"
-          currentSchema={currentSchema}
           migrationMode={migrationMode}
+          readOnlyMode={readOnlyMode}
         />
         <br />
         <div className={`${styles.padd_left_remove} container-fluid`}>
@@ -171,6 +172,8 @@ RelationshipsView.propTypes = {
   activeEdit: PropTypes.object.isRequired,
   manualRelAdd: PropTypes.object.isRequired,
   ongoingRequest: PropTypes.bool.isRequired,
+  migrationMode: PropTypes.bool.isRequired,
+  readOnlyMode: PropTypes.bool.isRequired,
   lastError: PropTypes.object,
   lastFormError: PropTypes.object,
   lastSuccess: PropTypes.bool,
@@ -183,6 +186,7 @@ const mapStateToProps = (state, ownProps) => ({
   allSchemas: state.tables.allSchemas,
   currentSchema: state.tables.currentSchema,
   migrationMode: state.main.migrationMode,
+  readOnlyMode: state.main.readOnlyMode,
   serverVersion: state.main.serverVersion,
   schemaList: state.tables.schemaList,
   ...state.tables.modify,

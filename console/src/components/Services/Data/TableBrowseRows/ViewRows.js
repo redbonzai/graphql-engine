@@ -27,13 +27,24 @@ import {
 } from './FilterActions';
 
 import _push from '../push';
-import { ordinalColSort, findTableFromRel } from '../utils';
+import { ordinalColSort } from '../utils';
 import FilterQuery from './FilterQuery';
 import Spinner from '../../../Common/Spinner/Spinner';
 import Button from '../../../Common/Button/Button';
 
 import { E_SET_EDITITEM } from './EditActions';
 import { I_SET_CLONE } from '../TableInsertItem/InsertActions';
+import {
+  getTableInsertRowRoute,
+  getTableEditRowRoute,
+} from '../../../Common/utils/routesUtils';
+import {
+  findTable,
+  getRelationshipRefTable,
+  getTableName,
+  getTableSchema,
+} from '../../../Common/utils/pgUtils';
+import { updateSchemaInfo } from '../DataActions';
 
 const ViewRows = ({
   curTableName,
@@ -59,6 +70,7 @@ const ViewRows = ({
   updateInvocationFunction,
   triggeredRow,
   triggeredFunction,
+  readOnlyMode,
 }) => {
   const styles = require('../../../Common/TableCommon/Table.scss');
 
@@ -87,7 +99,7 @@ const ViewRows = ({
       _curRelName &&
       parentTableSchema &&
       parentTableSchema.relationships.find(
-        r => r.name === _curRelName && r.rel_type === 'object'
+        r => r.rel_name === _curRelName && r.rel_type === 'object'
       )
     ) {
       // Am I an obj_rel for my parent?
@@ -106,10 +118,69 @@ const ViewRows = ({
   const getGridHeadings = (_columns, _relationships) => {
     const _gridHeadings = [];
 
+    const getColWidth = (header, contentRows = []) => {
+      const MAX_WIDTH = 600;
+      const HEADER_PADDING = 42;
+      const CONTENT_PADDING = 18;
+      const HEADER_FONT = 'bold 16px Gudea';
+      const CONTENT_FONT = '14px Gudea';
+
+      const getTextWidth = (text, font) => {
+        // Doesn't work well with non-monospace fonts
+        // const CHAR_WIDTH = 8;
+        // return text.length * CHAR_WIDTH;
+
+        // if given, use cached canvas for better performance
+        // else, create new canvas
+        const canvas =
+          getTextWidth.canvas ||
+          (getTextWidth.canvas = document.createElement('canvas'));
+
+        const context = canvas.getContext('2d');
+        context.font = font;
+
+        const metrics = context.measureText(text);
+        return metrics.width;
+      };
+
+      let maxContentWidth = 0;
+      for (let i = 0; i < contentRows.length; i++) {
+        if (contentRows[i] !== undefined && contentRows[i][header] !== null) {
+          const content = contentRows[i][header];
+
+          let contentString;
+          if (content === null || content === undefined) {
+            contentString = 'NULL';
+          } else if (typeof content === 'object') {
+            contentString = JSON.stringify(content, null, 4);
+          } else {
+            contentString = content.toString();
+          }
+
+          const currLength = getTextWidth(contentString, CONTENT_FONT);
+
+          if (currLength > maxContentWidth) {
+            maxContentWidth = currLength;
+          }
+        }
+      }
+
+      const maxContentCellWidth = maxContentWidth + CONTENT_PADDING;
+
+      const headerCellWidth =
+        getTextWidth(header, HEADER_FONT) + HEADER_PADDING;
+
+      return Math.min(
+        MAX_WIDTH,
+        Math.max(maxContentCellWidth, headerCellWidth)
+      );
+    };
+
     _gridHeadings.push({
       Header: '',
       accessor: 'tableRowActionButtons',
       id: 'tableRowActionButtons',
+      width: 152,
     });
 
     _columns.map(col => {
@@ -137,6 +208,7 @@ const ViewRows = ({
         accessor: columnName,
         id: columnName,
         foldable: true,
+        width: getColWidth(columnName, curRows),
       });
     });
 
@@ -152,6 +224,7 @@ const ViewRows = ({
         accessor: relName,
         id: relName,
         foldable: true,
+        width: getColWidth(relName),
       });
     });
 
@@ -248,7 +321,7 @@ const ViewRows = ({
           const handleEditClick = () => {
             dispatch({ type: E_SET_EDITITEM, oldItem: row, pkClause });
             dispatch(
-              _push(`/schema/${currentSchema}/tables/${curTableName}/edit`)
+              _push(getTableEditRowRoute(currentSchema, curTableName, true))
             );
           };
 
@@ -287,7 +360,7 @@ const ViewRows = ({
           const handleCloneClick = () => {
             dispatch({ type: I_SET_CLONE, clone: row });
             dispatch(
-              _push(`/schema/${currentSchema}/tables/${curTableName}/insert`)
+              _push(getTableInsertRowRoute(currentSchema, curTableName, true))
             );
           };
 
@@ -309,11 +382,21 @@ const ViewRows = ({
 
           const triggerOptions = manualTriggers.map(m => {
             return {
-              callbackArguments: [m.name, rowIndex],
-              buttonText: 'Invoke',
-              displayText: m.name,
-              testId: m.name,
-              onClick: invokeTrigger,
+              content: (
+                <div>
+                  <Button
+                    color="white"
+                    size="xs"
+                    data-test={`run_manual_trigger_${m.name}`}
+                    onClick={() =>
+                      invokeTrigger.apply(undefined, [m.name, rowIndex])
+                    }
+                  >
+                    Invoke
+                  </Button>
+                  {`${m.name}`}
+                </div>
+              ),
             };
           });
 
@@ -354,7 +437,7 @@ const ViewRows = ({
           );
         };
 
-        const showActionBtns = !_isSingleRow && !isView;
+        const showActionBtns = !readOnlyMode && !_isSingleRow && !isView;
 
         if (showActionBtns) {
           const pkClause = getPKClause();
@@ -413,13 +496,10 @@ const ViewRows = ({
           } else if (rowColumnValue === undefined) {
             cellValue = 'NULL';
             cellTitle = cellValue;
-          } else if (col.data_type === 'json' || col.data_type === 'jsonb') {
-            cellValue = JSON.stringify(rowColumnValue);
+          } else if (typeof rowColumnValue === 'object') {
+            cellValue = JSON.stringify(rowColumnValue, null, 4);
             cellTitle = cellValue;
           } else {
-            /*
-             * This will render [object Object] if the state is not common data types
-             * */
             cellValue = rowColumnValue.toString();
             cellTitle = cellValue;
           }
@@ -479,7 +559,20 @@ const ViewRows = ({
 
               const handleViewClick = e => {
                 e.preventDefault();
-                dispatch(vExpandRel(curPath, rel.rel_name, pkClause));
+
+                const childTableDef = getRelationshipRefTable(
+                  _tableSchema,
+                  rel
+                );
+                if (childTableDef.schema !== currentSchema) {
+                  dispatch(
+                    updateSchemaInfo({ schemas: [childTableDef.schema] })
+                  ).then(() => {
+                    dispatch(vExpandRel(curPath, rel.rel_name, pkClause));
+                  });
+                } else {
+                  dispatch(vExpandRel(curPath, rel.rel_name, pkClause));
+                }
               };
 
               cellValue = getRelExpander('View', '', handleViewClick);
@@ -586,18 +679,21 @@ const ViewRows = ({
         const rel = tableSchema.relationships.find(r => r.rel_name === cq.name);
 
         if (rel) {
+          const isObjectRel = rel.rel_type === 'object';
+
           let childRows = curRows[0][cq.name];
-          if (rel.rel_type === 'object') {
+          if (isObjectRel) {
             childRows = [childRows];
           }
-          // Find the name of this childTable using the rel
+
+          const childTableDef = getRelationshipRefTable(tableSchema, rel);
+          const childTable = findTable(schemas, childTableDef);
+
           return (
             <ViewRows
               key={i}
-              curTableName={
-                findTableFromRel(schemas, tableSchema, rel).table_name
-              }
-              currentSchema={currentSchema}
+              curTableName={getTableName(childTable)}
+              currentSchema={getTableSchema(childTable)}
               curQuery={cq}
               curFilter={curFilter}
               curPath={[...curPath, rel.rel_name]}
@@ -611,6 +707,7 @@ const ViewRows = ({
               curDepth={curDepth + 1}
               dispatch={dispatch}
               expandedRow={expandedRow}
+              readOnlyMode={readOnlyMode}
             />
           );
         }
@@ -743,7 +840,7 @@ const ViewRows = ({
 
     return (
       <DragFoldTable
-        className="-highlight"
+        className="-highlight -fit-content"
         data={_gridRows}
         columns={_gridHeadings}
         resizable
@@ -752,8 +849,8 @@ const ViewRows = ({
         minRows={0}
         getTheadThProps={getTheadThProps}
         getResizerProps={getResizerProps}
-        showPagination={count > curFilter.limit}
-        defaultPageSize={Math.min(curFilter.limit, count)}
+        showPagination={!isSingleRow}
+        pageSize={curFilter.limit}
         pages={Math.ceil(count / curFilter.limit)}
         onPageChange={handlePageChange}
         onPageSizeChange={handlePageSizeChange}
@@ -771,8 +868,7 @@ const ViewRows = ({
   return (
     <div className={isVisible ? '' : 'hide '}>
       {getFilterQuery()}
-      <hr />
-      <div className="row">
+      <div className={`row ${styles.add_mar_top}`}>
         <div className="col-xs-12">
           <div className={styles.tableContainer}>{renderTableBody()}</div>
           <br />

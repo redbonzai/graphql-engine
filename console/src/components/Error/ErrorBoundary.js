@@ -4,7 +4,7 @@ import {
   loadInconsistentObjects,
   redirectToMetadataStatus,
   isMetadataStatusPage,
-} from '../Services/Metadata/Actions';
+} from '../Services/Settings/Actions';
 import Spinner from '../Common/Spinner/Spinner';
 
 import PageNotFound, { NotFoundError } from './PageNotFound';
@@ -54,7 +54,7 @@ class ErrorBoundary extends React.Component {
 
   render() {
     const { metadata } = this.props;
-    const { hasError, type } = this.state;
+    const { hasError, type, error } = this.state;
 
     if (hasError && metadata.ongoingRequest) {
       return (
@@ -68,7 +68,7 @@ class ErrorBoundary extends React.Component {
       return type === '404' ? (
         <PageNotFound resetCallback={this.resetState} />
       ) : (
-        <RuntimeError resetCallback={this.resetState} />
+        <RuntimeError resetCallback={this.resetState} error={error} />
       );
     }
 

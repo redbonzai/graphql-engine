@@ -1,3 +1,9 @@
+import {
+  READ_ONLY_RUN_SQL_QUERIES,
+  checkFeatureSupport,
+} from '../../../helpers/versionUtils';
+import { getRunSqlQuery } from '../../Common/utils/v1QueryUtils';
+
 export const INTEGER = 'integer';
 export const SERIAL = 'serial';
 export const BIGINT = 'bigint';
@@ -36,6 +42,7 @@ export const getPlaceholder = type => {
 export const tabNameMap = {
   browse: 'Browse Rows',
   insert: 'Insert Row',
+  edit: 'Edit Row',
   modify: 'Modify',
   relationships: 'Relationships',
   permissions: 'Permissions',
@@ -208,6 +215,8 @@ export const fetchTrackedTableListQuery = options => {
       columns: [
         'table_schema',
         'table_name',
+        'is_enum',
+        'configuration',
         {
           name: 'primary_key',
           columns: ['*'],
@@ -224,10 +233,27 @@ export const fetchTrackedTableListQuery = options => {
           name: 'unique_constraints',
           columns: ['*'],
         },
+        {
+          name: 'check_constraints',
+          columns: ['*'],
+          order_by: {
+            column: 'constraint_name',
+            type: 'asc',
+          },
+        },
+        {
+          name: 'computed_fields',
+          columns: ['*'],
+          order_by: {
+            column: 'computed_field_name',
+            type: 'asc',
+          },
+        },
       ],
       order_by: [{ column: 'table_name', type: 'asc' }],
     },
   };
+
   if (
     (options.schemas && options.schemas.length !== 0) ||
     (options.tables && options.tables.length !== 0)
@@ -312,12 +338,11 @@ FROM
     ${whereQuery}
   ) as info
 `;
-  return {
-    type: 'run_sql',
-    args: {
-      sql: runSql,
-    },
-  };
+  return getRunSqlQuery(
+    runSql,
+    false,
+    checkFeatureSupport(READ_ONLY_RUN_SQL_QUERIES) ? true : false
+  );
 };
 
 export const fetchTrackedTableReferencedFkQuery = options => {
@@ -347,18 +372,19 @@ FROM
     ${whereQuery}
   ) as info
 `;
-  return {
-    type: 'run_sql',
-    args: {
-      sql: runSql,
-    },
-  };
+  return getRunSqlQuery(
+    runSql,
+    false,
+    checkFeatureSupport(READ_ONLY_RUN_SQL_QUERIES) ? true : false
+  );
 };
 
 export const fetchTableListQuery = options => {
   const whereQuery = generateWhereClause(options);
 
-  const runSql = `select 
+  // TODO: optimise this. Multiple OUTER JOINS causes data bloating
+  const runSql = `
+select 
   COALESCE(
     json_agg(
       row_to_json(info)
@@ -376,51 +402,58 @@ FROM
           quote_ident(ist.table_schema) || '.' || quote_ident(ist.table_name)
         ):: regclass, 
         'pg_class'
-      ) as comment, 
+      ) AS comment, 
       COALESCE(json_agg(
-        row_to_json(isc) :: JSONB || jsonb_build_object(
-          'comment', 
+        DISTINCT row_to_json(is_columns) :: JSONB || jsonb_build_object(
+          'comment',
           (
             SELECT 
               pg_catalog.col_description(
-                c.oid, isc.ordinal_position :: int
+                c.oid, is_columns.ordinal_position :: int
               ) 
             FROM 
               pg_catalog.pg_class c 
             WHERE 
-              c.oid = (
-                SELECT 
-                  (
-                    (
-                      quote_ident(ist.table_schema) || '.' || quote_ident(ist.table_name)
-                    ):: text
-                  ):: regclass :: oid
-              ) 
-              AND c.relname = isc.table_name
+              c.oid = (quote_ident(ist.table_schema) || '.' || quote_ident(ist.table_name)):: regclass :: oid
+              AND c.relname = is_columns.table_name
           )
         )
-      ) FILTER (WHERE isc.column_name IS NOT NULL), '[]' :: JSON) AS columns,
-      row_to_json(isc_views) as view_info
-    from 
+      ) FILTER (WHERE is_columns.column_name IS NOT NULL), '[]' :: JSON) AS columns,
+      COALESCE(json_agg(
+        DISTINCT row_to_json(is_triggers) :: JSONB || jsonb_build_object(
+          'comment',
+          (
+            SELECT description FROM pg_description JOIN pg_trigger ON pg_description.objoid = pg_trigger.oid 
+            WHERE 
+              tgname = is_triggers.trigger_name 
+              AND tgrelid = (quote_ident(is_triggers.event_object_schema) || '.' || quote_ident(is_triggers.event_object_table)):: regclass :: oid
+          )
+        )
+      ) FILTER (WHERE is_triggers.trigger_name IS NOT NULL), '[]' :: JSON) AS triggers,
+      row_to_json(is_views) AS view_info
+    FROM 
       information_schema.tables AS ist 
-      LEFT OUTER JOIN information_schema.columns AS isc ON isc.table_schema = ist.table_schema 
-      and isc.table_name = ist.table_name 
-      LEFT OUTER JOIN information_schema.views AS isc_views ON isc_views.table_schema = ist.table_schema
-      and isc_views.table_name = ist.table_name
+      LEFT OUTER JOIN information_schema.columns AS is_columns ON 
+        is_columns.table_schema = ist.table_schema 
+        AND is_columns.table_name = ist.table_name 
+      LEFT OUTER JOIN information_schema.views AS is_views ON is_views.table_schema = ist.table_schema
+        AND is_views.table_name = ist.table_name
+      LEFT OUTER JOIN information_schema.triggers AS is_triggers ON 
+        is_triggers.event_object_schema = ist.table_schema AND 
+        is_triggers.event_object_table = ist.table_name
     ${whereQuery} 
     GROUP BY 
       ist.table_schema, 
       ist.table_name,
       ist.table_type,
-      isc_views.*
+      is_views.*
   ) AS info
 `;
-  return {
-    type: 'run_sql',
-    args: {
-      sql: runSql,
-    },
-  };
+  return getRunSqlQuery(
+    runSql,
+    false,
+    checkFeatureSupport(READ_ONLY_RUN_SQL_QUERIES) ? true : false
+  );
 };
 
 export const mergeLoadSchemaData = (
@@ -444,6 +477,7 @@ export const mergeLoadSchemaData = (
     const _columns = infoSchemaTableInfo.columns;
     const _comment = infoSchemaTableInfo.comment;
     const _tableType = infoSchemaTableInfo.table_type;
+    const _triggers = infoSchemaTableInfo.triggers; // TODO: get from v1/query
     const _viewInfo = infoSchemaTableInfo.view_info; // TODO: get from v1/query
 
     let _primaryKey = null;
@@ -452,12 +486,20 @@ export const mergeLoadSchemaData = (
     let _uniqueConstraints = [];
     let _fkConstraints = [];
     let _refFkConstraints = [];
+    let _isEnum = false;
+    let _checkConstraints = [];
+    let _configuration = {};
+    let _computed_fields = [];
 
     if (_isTableTracked) {
       _primaryKey = trackedTableInfo.primary_key;
       _relationships = trackedTableInfo.relationships;
       _permissions = trackedTableInfo.permissions;
       _uniqueConstraints = trackedTableInfo.unique_constraints;
+      _isEnum = trackedTableInfo.is_enum;
+      _checkConstraints = trackedTableInfo.check_constraints;
+      _configuration = trackedTableInfo.configuration;
+      _computed_fields = trackedTableInfo.computed_fields;
 
       _fkConstraints = fkData.filter(
         fk => fk.table_schema === _tableSchema && fk.table_name === _tableName
@@ -477,13 +519,18 @@ export const mergeLoadSchemaData = (
       is_table_tracked: _isTableTracked,
       columns: _columns,
       comment: _comment,
+      triggers: _triggers,
       primary_key: _primaryKey,
       relationships: _relationships,
       permissions: _permissions,
       unique_constraints: _uniqueConstraints,
+      check_constraints: _checkConstraints,
       foreign_key_constraints: _fkConstraints,
       opp_foreign_key_constraints: _refFkConstraints,
       view_info: _viewInfo,
+      is_enum: _isEnum,
+      configuration: _configuration,
+      computed_fields: _computed_fields,
     };
 
     _mergedTableData.push(_mergedInfo);

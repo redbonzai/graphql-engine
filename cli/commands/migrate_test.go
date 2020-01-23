@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	sqldriver "database/sql/driver"
 	"fmt"
+	"github.com/hasura/graphql-engine/cli/migrate"
 	"io"
 	"io/ioutil"
 	"net/url"
@@ -13,8 +14,6 @@ import (
 	"testing"
 
 	"github.com/Masterminds/semver"
-
-	"github.com/hasura/graphql-engine/cli/migrate"
 	mt "github.com/hasura/graphql-engine/cli/migrate/testing"
 	"github.com/hasura/graphql-engine/cli/version"
 	_ "github.com/lib/pq"
@@ -32,46 +31,48 @@ var ravenVersions = []mt.Version{
 
 var testMetadataPrev = map[string][]byte{
 	"metadata": []byte(`functions: []
-query_templates: []
 remote_schemas: []
+query_collections: []
+allowlist: []
+version: 2
 tables:
-- array_relationships: []
+- table: test
+  is_enum: false
+  configuration:
+    custom_root_fields:
+      select: null
+      select_by_pk: null
+      select_aggregate: null
+      insert: null
+      update: null
+      delete: null
+    custom_column_names: {}
+  object_relationships: []
+  array_relationships: []
+  insert_permissions: []
+  select_permissions: []
+  update_permissions: []
   delete_permissions: []
   event_triggers: []
-  insert_permissions: []
-  object_relationships: []
-  select_permissions: []
-  table: test
-  update_permissions: []
+  computed_fields: []
 `),
 	"empty-metadata": []byte(`functions: []
-query_templates: []
 remote_schemas: []
+query_collections: []
+allowlist: []
+version: 2
 tables: []
 `),
 }
 
 var testMetadataCurrent = map[string][]byte{
-	"metadata": []byte(`allowlist: []
-functions: []
-query_collections: []
-query_templates: []
-remote_schemas: []
+	"metadata": []byte(`version: 2
 tables:
-- array_relationships: []
-  delete_permissions: []
-  event_triggers: []
-  insert_permissions: []
-  object_relationships: []
-  select_permissions: []
-  table: test
-  update_permissions: []
+- table:
+    schema: public
+    name: test
 `),
-	"empty-metadata": []byte(`allowlist: []
-functions: []
-query_collections: []
-query_templates: []
-remote_schemas: []
+	"empty-metadata": []byte(`version: 2
 tables: []
 `),
 }
@@ -178,11 +179,13 @@ func testMigrate(t *testing.T, endpoint *url.URL, migrationsDir string) {
 	expectedStatus := migrate.NewStatus()
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   1,
+		Name:      "create_table_test",
 		IsApplied: true,
 		IsPresent: true,
 	})
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   2,
+		Name:      "add_table_test",
 		IsApplied: false,
 		IsPresent: true,
 	})
@@ -195,11 +198,13 @@ func testMigrate(t *testing.T, endpoint *url.URL, migrationsDir string) {
 	expectedStatus = migrate.NewStatus()
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   1,
+		Name:      "create_table_test",
 		IsApplied: true,
 		IsPresent: true,
 	})
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   2,
+		Name:      "add_table_test",
 		IsApplied: true,
 		IsPresent: true,
 	})
@@ -212,11 +217,13 @@ func testMigrate(t *testing.T, endpoint *url.URL, migrationsDir string) {
 	expectedStatus = migrate.NewStatus()
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   1,
+		Name:      "create_table_test",
 		IsApplied: true,
 		IsPresent: true,
 	})
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   2,
+		Name:      "add_table_test",
 		IsApplied: false,
 		IsPresent: true,
 	})
@@ -229,11 +236,13 @@ func testMigrate(t *testing.T, endpoint *url.URL, migrationsDir string) {
 	expectedStatus = migrate.NewStatus()
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   1,
+		Name:      "create_table_test",
 		IsApplied: false,
 		IsPresent: true,
 	})
 	expectedStatus.Append(&migrate.MigrationStatus{
 		Version:   2,
+		Name:      "add_table_test",
 		IsApplied: false,
 		IsPresent: true,
 	})
@@ -252,6 +261,8 @@ func testMigrate(t *testing.T, endpoint *url.URL, migrationsDir string) {
 	testMetadataReset(t, metadataFile, endpoint)
 	testMetadataExport(t, metadataFile, endpoint)
 	compareMetadata(t, metadataFile, "empty-metadata", versionCtx.ServerSemver)
+
+	testMetadataInconsistencyDropCmd(t, migrationsDir, metadataFile, endpoint)
 }
 
 func mustWriteFile(t testing.TB, dir, file string, body string) {
@@ -262,7 +273,7 @@ func mustWriteFile(t testing.TB, dir, file string, body string) {
 
 func compareMetadata(t testing.TB, metadataFile string, actualType string, serverVersion *semver.Version) {
 	var actualData []byte
-	c, err := semver.NewConstraint("<= 1.0.0-alpha45")
+	c, err := semver.NewConstraint("<= v1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,3 +1,7 @@
+.. meta::
+   :description: Manage event triggers with the Hasura schema/metadata API
+   :keywords: hasura, docs, schema/metadata API, API reference, event trigger
+
 Schema/Metadata API Reference: Event Triggers 
 =============================================
 
@@ -95,7 +99,7 @@ Args syntax
    * - replace
      - false
      - Boolean
-     - If set to true, event trigger is replaced with the new definition
+     - If set to true, the event trigger is replaced with the new definition
 
 .. _delete_event_trigger:
 
@@ -200,7 +204,7 @@ OperationSpec
    * - columns
      - true
      - EventTriggerColumns_
-     - List of columns or "*" to listen changes on
+     - List of columns or "*" to listen to changes
    * - payload
      - false
      - EventTriggerColumns_

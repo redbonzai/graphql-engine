@@ -1,3 +1,7 @@
+.. meta::
+   :description: Manage event triggers with Hasura
+   :keywords: hasura, docs, event trigger
+
 Event Triggers
 ==============
 
@@ -11,13 +15,14 @@ events on specified tables and invoke webhooks to carry out any custom logic.
 
 .. thumbnail:: ../../../img/graphql/manual/event-triggers/database-event-triggers.png
    :class: no-shadow
+   :alt: Hasura event trigger architecture
 
 Events can be of the following types:
 
 - INSERT: When a row is inserted into a table
 - UPDATE: When a row is updated in a table
 - DELETE: When a row is deleted from a table
-- MANUAL: Using the console or API, an event can be triggered manually on a row.
+- MANUAL: Using the console or API, an event can be triggered manually on a row
 
 **See:**
 
@@ -30,3 +35,4 @@ Events can be of the following types:
    serverless
    samples
    Invoke trigger via console <invoke-trigger-console>
+   clean-up

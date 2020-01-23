@@ -2,17 +2,18 @@
 
 import string
 import random
-import yaml
+import ruamel.yaml as yaml
 import json
 import queue
 import requests
+import time
 
 import pytest
 
 from validate import check_query_f, check_query
 
 
-def mk_add_remote_q(name, url, headers=None, client_hdrs=False):
+def mk_add_remote_q(name, url, headers=None, client_hdrs=False, timeout=None):
     return {
         "type": "add_remote_schema",
         "args": {
@@ -21,7 +22,8 @@ def mk_add_remote_q(name, url, headers=None, client_hdrs=False):
             "definition": {
                 "url": url,
                 "headers": headers,
-                "forward_client_headers": client_hdrs
+                "forward_client_headers": client_hdrs,
+                "timeout_seconds": timeout
             }
         }
     }
@@ -69,7 +71,7 @@ class TestRemoteSchemaBasic:
         #check_query_f(hge_ctx, 'queries/graphql_introspection/introspection.yaml')
         with open('queries/graphql_introspection/introspection.yaml') as f:
             query = yaml.safe_load(f)
-        resp = check_query(hge_ctx, query)
+        resp, _ = check_query(hge_ctx, query)
         assert check_introspection_result(resp, ['Hello'], ['hello'])
 #
 
@@ -88,7 +90,7 @@ class TestRemoteSchemaBasic:
         q = mk_add_remote_q('simple 2', 'http://localhost:5000/hello-graphql')
         st_code, resp = hge_ctx.v1q(q)
         assert st_code == 400
-        assert resp['code'] == 'remote-schema-conflicts'
+        assert resp['code'] == 'constraint-violation'
 
     def test_remove_schema_error(self, hge_ctx):
         """remove remote schema which is not added"""
@@ -209,7 +211,7 @@ class TestAddRemoteSchemaTbls:
         q = mk_add_remote_q('simple2', 'http://localhost:5000/hello-graphql')
         st_code, resp = hge_ctx.v1q(q)
         assert st_code == 400
-        assert resp['code'] == 'remote-schema-conflicts'
+        assert resp['code'] == 'constraint-violation'
 
     def test_add_second_remote_schema(self, hge_ctx):
         """add 2 remote schemas with different node and types"""
@@ -233,7 +235,7 @@ class TestAddRemoteSchemaTbls:
     def test_introspection(self, hge_ctx):
         with open('queries/graphql_introspection/introspection.yaml') as f:
             query = yaml.safe_load(f)
-        resp = check_query(hge_ctx, query)
+        resp, _ = check_query(hge_ctx, query)
         assert check_introspection_result(resp, ['User', 'hello'], ['user', 'hello'])
 
     def test_add_schema_duplicate_name(self, hge_ctx):
@@ -416,7 +418,7 @@ class TestAddRemoteSchemaCompareRootQueryFields:
     def test_schema_check_arg_default_values_and_field_and_arg_types(self, hge_ctx):
         with open('queries/graphql_introspection/introspection.yaml') as f:
             query = yaml.safe_load(f)
-        introspect_hasura = check_query(hge_ctx, query)
+        introspect_hasura, _ = check_query(hge_ctx, query)
         resp = requests.post(
             self.remote,
             json=query['query']
@@ -434,6 +436,22 @@ class TestAddRemoteSchemaCompareRootQueryFields:
                 compare_flds(fldH, fldR)
             assert has_fld[fldR['name']], 'Field ' + fldR['name'] + ' in the remote shema root query type not found in Hasura schema'
 
+class TestRemoteSchemaTimeout:
+    dir = 'queries/remote_schemas'
+    teardown = {"type": "clear_metadata", "args": {}}
+
+    @pytest.fixture(autouse=True)
+    def transact(self, hge_ctx):
+        q = mk_add_remote_q('simple 1', 'http://localhost:5000/hello-graphql', timeout = 5)
+        st_code, resp = hge_ctx.v1q(q)
+        assert st_code == 200, resp
+        yield
+        hge_ctx.v1q(self.teardown)
+
+    def test_remote_query_timeout(self, hge_ctx):
+        check_query_f(hge_ctx, self.dir + '/basic_timeout_query.yaml')
+        # wait for graphql server to finish else teardown throws
+        time.sleep(6)
 
 #    def test_remote_query_variables(self, hge_ctx):
 #        pass
