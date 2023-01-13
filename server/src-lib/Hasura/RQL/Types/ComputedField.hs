@@ -1,28 +1,43 @@
-{- |
-Description: Schema cache types related to computed field
--}
+{-# LANGUAGE TemplateHaskell #-}
 
-module Hasura.RQL.Types.ComputedField where
+-- |
+-- Description: Schema cache types related to computed field
+module Hasura.RQL.Types.ComputedField
+  ( ComputedFieldFunction (..),
+    ComputedFieldInfo (..),
+    ComputedFieldName (..),
+    CustomFunctionNames (..),
+    FunctionTrackedAs (..),
+    cfiDescription,
+    cfiFunction,
+    cfiName,
+    cfiReturnType,
+    cfiXComputedFieldInfo,
+    computedFieldNameToText,
+    fromComputedField,
+    removeComputedFieldsReturningExistingTable,
+  )
+where
 
-import           Hasura.Incremental         (Cacheable)
-import           Hasura.Prelude
-import           Hasura.RQL.Types.Common
-import           Hasura.RQL.Types.Function
-import           Hasura.SQL.Types
+import Autodocodec (HasCodec (codec), dimapCodec)
+import Control.Lens hiding ((.=))
+import Data.Aeson
+import Data.Sequence qualified as Seq
+import Data.Text.Extended
+import Data.Text.NonEmpty (NonEmptyText (..))
+import Database.PG.Query qualified as PG
+import Hasura.Backends.Postgres.SQL.Types hiding (FunctionName, TableName)
+import Hasura.Prelude
+import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.Common
+import Hasura.SQL.Backend
+import Language.GraphQL.Draft.Syntax (Name)
 
-import           Control.Lens               hiding ((.=))
-import           Data.Aeson
-import           Data.Aeson.Casing
-import           Data.Aeson.TH
-import           Instances.TH.Lift          ()
-import           Language.Haskell.TH.Syntax (Lift)
+newtype ComputedFieldName = ComputedFieldName {unComputedFieldName :: NonEmptyText}
+  deriving (Show, Eq, Ord, NFData, FromJSON, ToJSON, ToJSONKey, PG.ToPrepArg, ToTxt, Hashable, PG.FromCol, Generic)
 
-import qualified Data.Sequence              as Seq
-import qualified Database.PG.Query          as Q
-
-newtype ComputedFieldName =
-  ComputedFieldName { unComputedFieldName :: NonEmptyText}
-  deriving (Show, Eq, NFData, Lift, FromJSON, ToJSON, Q.ToPrepArg, DQuote, Hashable, Q.FromCol, Generic, Arbitrary, Cacheable)
+instance HasCodec ComputedFieldName where
+  codec = dimapCodec ComputedFieldName unComputedFieldName codec
 
 computedFieldNameToText :: ComputedFieldName -> Text
 computedFieldNameToText = unNonEmptyText . unComputedFieldName
@@ -30,52 +45,72 @@ computedFieldNameToText = unNonEmptyText . unComputedFieldName
 fromComputedField :: ComputedFieldName -> FieldName
 fromComputedField = FieldName . computedFieldNameToText
 
--- | The function table argument is either the very first argument or the named
--- argument with an index. The index is 0 if the named argument is the first.
-data FunctionTableArgument
-  = FTAFirst
-  | FTANamed
-    !FunctionArgName -- ^ argument name
-    !Int -- ^ argument index
+data FunctionTrackedAs (b :: BackendType)
+  = FTAComputedField ComputedFieldName SourceName (TableName b)
+  | FTACustomFunction CustomFunctionNames
+  deriving (Generic)
+
+-- | The function name and input arguments name for the "args" field parser.
+--
+-- > function_name(args: args_name)
+data CustomFunctionNames = CustomFunctionNames
+  { cfnFunctionName :: Name,
+    cfnArgsName :: Name
+  }
   deriving (Show, Eq, Generic)
-instance Cacheable FunctionTableArgument
 
-instance ToJSON FunctionTableArgument where
-  toJSON FTAFirst             = String "first_argument"
-  toJSON (FTANamed argName _) = object ["name" .= argName]
+deriving instance Backend b => Show (FunctionTrackedAs b)
 
-data ComputedFieldReturn
-  = CFRScalar !PGScalarType
-  | CFRSetofTable !QualifiedTable
-  deriving (Show, Eq, Generic)
-instance Cacheable ComputedFieldReturn
-$(deriveToJSON defaultOptions { constructorTagModifier = snakeCase . drop 3
-                              , sumEncoding = TaggedObject "type" "info"
-                              }
-   ''ComputedFieldReturn
- )
-$(makePrisms ''ComputedFieldReturn)
+deriving instance Backend b => Eq (FunctionTrackedAs b)
 
-data ComputedFieldFunction
-  = ComputedFieldFunction
-  { _cffName          :: !QualifiedFunction
-  , _cffInputArgs     :: !(Seq.Seq FunctionArg)
-  , _cffTableArgument :: !FunctionTableArgument
-  , _cffDescription   :: !(Maybe PGDescription)
-  } deriving (Show, Eq, Generic)
-instance Cacheable ComputedFieldFunction
-$(deriveToJSON (aesonDrop 4 snakeCase) ''ComputedFieldFunction)
+data ComputedFieldFunction (b :: BackendType) = ComputedFieldFunction
+  { _cffName :: FunctionName b,
+    _cffInputArgs :: Seq.Seq (FunctionArgument b),
+    _cffComputedFieldImplicitArgs :: ComputedFieldImplicitArguments b,
+    _cffDescription :: Maybe PGDescription
+  }
+  deriving (Generic)
 
-data ComputedFieldInfo
-  = ComputedFieldInfo
-  { _cfiName       :: !ComputedFieldName
-  , _cfiFunction   :: !ComputedFieldFunction
-  , _cfiReturnType :: !ComputedFieldReturn
-  , _cfiComment    :: !(Maybe Text)
-  } deriving (Show, Eq, Generic)
-instance Cacheable ComputedFieldInfo
-$(deriveToJSON (aesonDrop 4 snakeCase) ''ComputedFieldInfo)
+deriving instance (Backend b) => Show (ComputedFieldFunction b)
+
+deriving instance (Backend b) => Eq (ComputedFieldFunction b)
+
+instance (Backend b) => NFData (ComputedFieldFunction b)
+
+instance (Backend b) => Hashable (ComputedFieldFunction b)
+
+instance (Backend b) => ToJSON (ComputedFieldFunction b) where
+  toJSON = genericToJSON hasuraJSON
+
+data ComputedFieldInfo (b :: BackendType) = ComputedFieldInfo
+  { _cfiXComputedFieldInfo :: XComputedField b,
+    _cfiName :: ComputedFieldName,
+    _cfiFunction :: ComputedFieldFunction b,
+    _cfiReturnType :: ComputedFieldReturn b,
+    _cfiDescription :: Maybe Text
+  }
+  deriving (Generic)
+
+deriving instance (Backend b) => Eq (ComputedFieldInfo b)
+
+deriving instance (Backend b) => Show (ComputedFieldInfo b)
+
+instance (Backend b) => NFData (ComputedFieldInfo b)
+
+instance (Backend b) => Hashable (ComputedFieldInfo b)
+
+instance (Backend b) => ToJSON (ComputedFieldInfo b) where
+  -- spelling out the JSON instance in order to skip the Trees That Grow field
+  toJSON (ComputedFieldInfo _ name func tp description) =
+    object ["name" .= name, "function" .= func, "return_type" .= tp, "description" .= description]
+
 $(makeLenses ''ComputedFieldInfo)
 
-onlyScalarComputedFields :: [ComputedFieldInfo] -> [ComputedFieldInfo]
-onlyScalarComputedFields = filter (has (cfiReturnType._CFRScalar))
+-- | Filter computed fields not returning rows of existing table
+removeComputedFieldsReturningExistingTable ::
+  forall backend.
+  (Backend backend) =>
+  [ComputedFieldInfo backend] ->
+  [ComputedFieldInfo backend]
+removeComputedFieldsReturningExistingTable =
+  filter (not . has _ReturnsTable . computedFieldReturnType @backend . _cfiReturnType)

@@ -1,400 +1,246 @@
--- As of GHC 8.6, a use of DefaultSignatures in this module triggers a false positive for this
--- warning, so don’t treat it as an error even if -Werror is enabled.
-{-# OPTIONS_GHC -Wwarn=redundant-constraints #-}
-
-{-# LANGUAGE GADTs                #-}
-{-# LANGUAGE RankNTypes           #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Hasura.RQL.Types.SchemaCache
-  ( SchemaCache(..)
-  , SchemaCacheVer
-  , initSchemaCacheVer
-  , incSchemaCacheVer
-  , TableConfig(..)
-  , emptyTableConfig
+  ( SchemaCache (..),
+    SchemaCacheVer,
+    initSchemaCacheVer,
+    incSchemaCacheVer,
+    TableConfig (..),
+    emptyTableConfig,
+    getAllRemoteSchemas,
+    unsafeFunctionCache,
+    unsafeFunctionInfo,
+    unsafeTableCache,
+    unsafeTableInfo,
+    askSourceInfo,
+    askSourceInfoMaybe,
+    askSourceConfig,
+    askSourceConfigMaybe,
+    askTableCache,
+    askTableInfo,
+    askTableCoreInfo,
+    askTableFieldInfoMap,
+    askTableMetadata,
+    askFunctionInfo,
+    askFieldInfoMapSource,
+    TableCoreCache,
+    TableCache,
+    ActionCache,
+    InheritedRolesCache,
+    TableCoreInfoG (..),
+    TableCoreInfo,
+    tciName,
+    tciDescription,
+    tciFieldInfoMap,
+    tciPrimaryKey,
+    tciUniqueConstraints,
+    tciForeignKeys,
+    tciViewInfo,
+    tciEnumValues,
+    tciCustomConfig,
+    tciUniqueOrPrimaryKeyConstraints,
+    TableInfo (..),
+    tiCoreInfo,
+    tiRolePermInfoMap,
+    tiEventTriggerInfoMap,
+    ViewInfo (..),
+    isMutable,
+    IntrospectionResult (..),
+    RemoteSchemaCustomizer (..),
+    remoteSchemaCustomizeTypeName,
+    remoteSchemaCustomizeFieldName,
+    RemoteSchemaRelationships,
+    RemoteSchemaCtxG (..),
+    PartiallyResolvedRemoteSchemaCtx,
+    RemoteSchemaCtx,
+    PartiallyResolvedRemoteSchemaMap,
+    RemoteSchemaMap,
+    DepMap,
+    WithDeps,
+    TableCoreInfoRM (..),
+    TableCoreCacheRT (..),
+    TableInfoRM (..),
+    TableCacheRT (..),
+    CacheRM (..),
+    FieldInfoMap,
+    FieldInfo (..),
+    _FIColumn,
+    _FIRelationship,
+    _FIComputedField,
+    fieldInfoName,
+    fieldInfoGraphQLNames,
+    getCols,
+    getRels,
+    getComputedFieldInfos,
+    RolePermInfoMap,
+    InsPermInfo (..),
+    UpdPermInfo (..),
+    DelPermInfo (..),
+    PreSetColsPartial,
+    EventTriggerInfo (..),
+    EventTriggerInfoMap,
+    TableObjId (..),
+    SchemaObjId (..),
+    reportSchemaObj,
+    reportSchemaObjs,
+    DependencyReason (..),
+    SchemaDependency (..),
+    mkParentDep,
+    mkColDep,
+    mkComputedFieldDep,
+    getDependentObjs,
+    getDependentObjsWith,
+    getRemoteDependencies,
+    FunctionVolatility (..),
+    FunctionArgName (..),
+    FunctionInfo (..),
+    FunctionCache,
+    CronTriggerInfo (..),
+    MetadataResourceVersion (..),
+    initialResourceVersion,
+    getBoolExpDeps,
+    InlinedAllowlist,
+    BoolExpM (..),
+    BoolExpCtx (..),
+    getOpExpDeps,
+    BackendInfoWrapper (..),
+    BackendCache,
+    getBackendInfo,
+  )
+where
 
-  , TableCoreCache
-  , TableCache
+import Control.Lens (Traversal', at, preview, (^.))
+import Data.Aeson
+import Data.Aeson.TH
+import Data.HashMap.Strict qualified as M
+import Data.HashSet qualified as HS
+import Data.Int (Int64)
+import Data.Text.Extended ((<<>))
+import Data.Text.Extended qualified as T
+import Database.MSSQL.Transaction qualified as MSSQL
+import Database.PG.Query qualified as PG
+import Hasura.Backends.Postgres.Connection qualified as Postgres
+import Hasura.Base.Error
+import Hasura.GraphQL.Context (GQLContext, RoleContext)
+import Hasura.Prelude
+import Hasura.RQL.DDL.Webhook.Transform
+import Hasura.RQL.IR.BoolExp
+import Hasura.RQL.Types.Action
+import Hasura.RQL.Types.Allowlist
+import Hasura.RQL.Types.ApiLimit
+import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.Column
+import Hasura.RQL.Types.Common
+import Hasura.RQL.Types.ComputedField
+import Hasura.RQL.Types.Endpoint
+import Hasura.RQL.Types.EventTrigger
+import Hasura.RQL.Types.Function
+import Hasura.RQL.Types.GraphqlSchemaIntrospection
+import Hasura.RQL.Types.Metadata
+import Hasura.RQL.Types.Metadata.Object
+import Hasura.RQL.Types.Network (TlsAllow)
+import Hasura.RQL.Types.OpenTelemetry (OpenTelemetryInfo)
+import Hasura.RQL.Types.QueryCollection
+import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.Relationships.Remote
+import Hasura.RQL.Types.ScheduledTrigger
+import Hasura.RQL.Types.SchemaCacheTypes
+import Hasura.RQL.Types.Source
+import Hasura.RQL.Types.Table
+import Hasura.RemoteSchema.Metadata
+import Hasura.RemoteSchema.SchemaCache.Types
+import Hasura.SQL.AnyBackend qualified as AB
+import Hasura.SQL.Backend
+import Hasura.SQL.BackendMap (BackendMap)
+import Hasura.SQL.BackendMap qualified as BackendMap
+import Hasura.SQL.Tag (HasTag (backendTag), reify)
+import Hasura.Server.Types
+import Hasura.Session
+import Hasura.Tracing (TraceT)
+import Language.GraphQL.Draft.Syntax qualified as G
+import System.Cron.Types
 
-  , TableCoreInfoG(..)
-  , TableRawInfo
-  , TableCoreInfo
-  , tciName
-  , tciDescription
-  , tciSystemDefined
-  , tciFieldInfoMap
-  , tciPrimaryKey
-  , tciUniqueConstraints
-  , tciForeignKeys
-  , tciViewInfo
-  , tciEnumValues
-  , tciCustomConfig
-  , tciUniqueOrPrimaryKeyConstraints
+newtype MetadataResourceVersion = MetadataResourceVersion
+  { getMetadataResourceVersion :: Int64
+  }
+  deriving (Show, Eq, Num, FromJSON, ToJSON)
 
-  , TableInfo(..)
-  , tiCoreInfo
-  , tiRolePermInfoMap
-  , tiEventTriggerInfoMap
+initialResourceVersion :: MetadataResourceVersion
+initialResourceVersion = MetadataResourceVersion 0
 
-  , ViewInfo(..)
-  , checkForFieldConflict
-  , isMutable
-  , mutableView
+mkParentDep ::
+  forall b.
+  Backend b =>
+  SourceName ->
+  TableName b ->
+  SchemaDependency
+mkParentDep s tn =
+  SchemaDependency (SOSourceObj s $ AB.mkAnyBackend @b (SOITable tn)) DRTable
 
-  , RemoteSchemaCtx(..)
-  , RemoteSchemaMap
+mkColDep ::
+  forall b.
+  (Backend b) =>
+  DependencyReason ->
+  SourceName ->
+  TableName b ->
+  Column b ->
+  SchemaDependency
+mkColDep reason source tn col =
+  flip SchemaDependency reason
+    . SOSourceObj source
+    . AB.mkAnyBackend
+    . SOITableObj @b tn
+    $ TOCol @b col
 
-  , DepMap
-  , WithDeps
+mkComputedFieldDep ::
+  forall b.
+  (Backend b) =>
+  DependencyReason ->
+  SourceName ->
+  TableName b ->
+  ComputedFieldName ->
+  SchemaDependency
+mkComputedFieldDep reason s tn computedField =
+  flip SchemaDependency reason
+    . SOSourceObj s
+    . AB.mkAnyBackend
+    . SOITableObj @b tn
+    $ TOComputedField computedField
 
-  , TableCoreInfoRM(..)
-  , TableCoreCacheRT(..)
-  , CacheRM(..)
-  , CacheRT(..)
+type WithDeps a = (a, Seq SchemaDependency)
 
-  , FieldInfoMap
-  , FieldInfo(..)
-  , _FIColumn
-  , _FIRelationship
-  , _FIComputedField
-  , fieldInfoName
-  , fieldInfoGraphQLNames
-  , getCols
-  , getRels
-  , getComputedFieldInfos
+type RemoteSchemaRelationships = RemoteSchemaRelationshipsG (RemoteFieldInfo G.Name)
 
-  , isPGColInfo
-  , RelInfo(..)
-
-  , RolePermInfo(..)
-  , emptyRolePermInfo
-  , permIns
-  , permSel
-  , permUpd
-  , permDel
-  , PermAccessor(..)
-  , permAccToLens
-  , permAccToType
-  , withPermType
-  , RolePermInfoMap
-
-  , InsPermInfo(..)
-  , SelPermInfo(..)
-  , UpdPermInfo(..)
-  , DelPermInfo(..)
-  , PreSetColsPartial
-
-  , EventTriggerInfo(..)
-  , EventTriggerInfoMap
-
-  , TableObjId(..)
-  , SchemaObjId(..)
-  , reportSchemaObj
-  , reportSchemaObjs
-  , DependencyReason(..)
-  , SchemaDependency(..)
-  , mkParentDep
-  , mkColDep
-  , mkComputedFieldDep
-  , getDependentObjs
-  , getDependentObjsWith
-
-  , FunctionType(..)
-  , FunctionArg(..)
-  , FunctionArgName(..)
-  , FunctionName(..)
-  , FunctionInfo(..)
-  , FunctionCache
-  , getFuncsOfTable
-  , askFunctionInfo
-  ) where
-
-import qualified Hasura.GraphQL.Context            as GC
-
-import           Hasura.Db
-import           Hasura.Incremental                (Cacheable, Dependency, MonadDepend (..),
-                                                    selectKeyD)
-import           Hasura.Prelude
-import           Hasura.RQL.Types.BoolExp
-import           Hasura.RQL.Types.Column
-import           Hasura.RQL.Types.Common
-import           Hasura.RQL.Types.ComputedField
-import           Hasura.RQL.Types.Error
-import           Hasura.RQL.Types.EventTrigger
-import           Hasura.RQL.Types.Function
-import           Hasura.RQL.Types.Metadata
-import           Hasura.RQL.Types.Permission
-import           Hasura.RQL.Types.QueryCollection
-import           Hasura.RQL.Types.RemoteSchema
-import           Hasura.RQL.Types.SchemaCacheTypes
-import           Hasura.SQL.Types
-
-import           Control.Lens
-import           Data.Aeson
-import           Data.Aeson.Casing
-import           Data.Aeson.TH
-import           Language.Haskell.TH.Syntax        (Lift)
-
-import qualified Data.HashMap.Strict               as M
-import qualified Data.HashSet                      as HS
-import qualified Data.Text                         as T
-import qualified Language.GraphQL.Draft.Syntax     as G
-
-reportSchemaObjs :: [SchemaObjId] -> T.Text
-reportSchemaObjs = T.intercalate ", " . sort . map reportSchemaObj
-
-mkParentDep :: QualifiedTable -> SchemaDependency
-mkParentDep tn = SchemaDependency (SOTable tn) DRTable
-
-mkColDep :: DependencyReason -> QualifiedTable -> PGCol -> SchemaDependency
-mkColDep reason tn col =
-  flip SchemaDependency reason . SOTableObj tn $ TOCol col
-
-mkComputedFieldDep
-  :: DependencyReason -> QualifiedTable -> ComputedFieldName -> SchemaDependency
-mkComputedFieldDep reason tn computedField =
-  flip SchemaDependency reason . SOTableObj tn $ TOComputedField computedField
-
-type WithDeps a = (a, [SchemaDependency])
-
-data FieldInfo
-  = FIColumn !PGColumnInfo
-  | FIRelationship !RelInfo
-  | FIComputedField !ComputedFieldInfo
-  deriving (Show, Eq, Generic)
-instance Cacheable FieldInfo
-$(deriveToJSON
-  defaultOptions { constructorTagModifier = snakeCase . drop 2
-                 , sumEncoding = TaggedObject "type" "detail"
-                 }
-  ''FieldInfo)
-$(makePrisms ''FieldInfo)
-
-type FieldInfoMap = M.HashMap FieldName
-
-fieldInfoName :: FieldInfo -> FieldName
-fieldInfoName = \case
-  FIColumn info -> fromPGCol $ pgiColumn info
-  FIRelationship info -> fromRel $ riName info
-  FIComputedField info -> fromComputedField $ _cfiName info
-
--- | Returns all the field names created for the given field. Columns, object relationships, and
--- computed fields only ever produce a single field, but array relationships also contain an
--- @_aggregate@ field.
-fieldInfoGraphQLNames :: FieldInfo -> [G.Name]
-fieldInfoGraphQLNames = \case
-  FIColumn info -> [pgiName info]
-  FIRelationship info ->
-    let name = G.Name . relNameToTxt $ riName info
-    in case riType info of
-      ObjRel -> [name]
-      ArrRel -> [name, name <> "_aggregate"]
-  FIComputedField info -> [G.Name . computedFieldNameToText $ _cfiName info]
-
-getCols :: FieldInfoMap FieldInfo -> [PGColumnInfo]
-getCols = mapMaybe (^? _FIColumn) . M.elems
-
-getRels :: FieldInfoMap FieldInfo -> [RelInfo]
-getRels = mapMaybe (^? _FIRelationship) . M.elems
-
-getComputedFieldInfos :: FieldInfoMap FieldInfo -> [ComputedFieldInfo]
-getComputedFieldInfos = mapMaybe (^? _FIComputedField) . M.elems
-
-isPGColInfo :: FieldInfo -> Bool
-isPGColInfo (FIColumn _) = True
-isPGColInfo _            = False
-
-data InsPermInfo
-  = InsPermInfo
-  { ipiCols            :: !(HS.HashSet PGCol)
-  , ipiCheck           :: !AnnBoolExpPartialSQL
-  , ipiSet             :: !PreSetColsPartial
-  , ipiRequiredHeaders :: ![T.Text]
-  } deriving (Show, Eq, Generic)
-instance NFData InsPermInfo
-instance Cacheable InsPermInfo
-$(deriveToJSON (aesonDrop 3 snakeCase) ''InsPermInfo)
-
-data SelPermInfo
-  = SelPermInfo
-  { spiCols                 :: !(HS.HashSet PGCol)
-  , spiScalarComputedFields :: !(HS.HashSet ComputedFieldName)
-  , spiTable                :: !QualifiedTable
-  , spiFilter               :: !AnnBoolExpPartialSQL
-  , spiLimit                :: !(Maybe Int)
-  , spiAllowAgg             :: !Bool
-  , spiRequiredHeaders      :: ![T.Text]
-  } deriving (Show, Eq, Generic)
-instance NFData SelPermInfo
-instance Cacheable SelPermInfo
-$(deriveToJSON (aesonDrop 3 snakeCase) ''SelPermInfo)
-
-data UpdPermInfo
-  = UpdPermInfo
-  { upiCols            :: !(HS.HashSet PGCol)
-  , upiTable           :: !QualifiedTable
-  , upiFilter          :: !AnnBoolExpPartialSQL
-  , upiSet             :: !PreSetColsPartial
-  , upiRequiredHeaders :: ![T.Text]
-  } deriving (Show, Eq, Generic)
-instance NFData UpdPermInfo
-instance Cacheable UpdPermInfo
-$(deriveToJSON (aesonDrop 3 snakeCase) ''UpdPermInfo)
-
-data DelPermInfo
-  = DelPermInfo
-  { dpiTable           :: !QualifiedTable
-  , dpiFilter          :: !AnnBoolExpPartialSQL
-  , dpiRequiredHeaders :: ![T.Text]
-  } deriving (Show, Eq, Generic)
-instance NFData DelPermInfo
-instance Cacheable DelPermInfo
-$(deriveToJSON (aesonDrop 3 snakeCase) ''DelPermInfo)
-
-emptyRolePermInfo :: RolePermInfo
-emptyRolePermInfo = RolePermInfo Nothing Nothing Nothing Nothing
-
-data RolePermInfo
-  = RolePermInfo
-  { _permIns :: !(Maybe InsPermInfo)
-  , _permSel :: !(Maybe SelPermInfo)
-  , _permUpd :: !(Maybe UpdPermInfo)
-  , _permDel :: !(Maybe DelPermInfo)
-  } deriving (Show, Eq, Generic)
-instance NFData RolePermInfo
-$(deriveToJSON (aesonDrop 5 snakeCase) ''RolePermInfo)
-
-makeLenses ''RolePermInfo
-
-type RolePermInfoMap = M.HashMap RoleName RolePermInfo
-
-data EventTriggerInfo
- = EventTriggerInfo
-   { etiName        :: !TriggerName
-   , etiOpsDef      :: !TriggerOpsDef
-   , etiRetryConf   :: !RetryConf
-   , etiWebhookInfo :: !WebhookConfInfo
-   , etiHeaders     :: ![EventHeaderInfo]
-   } deriving (Show, Eq, Generic)
-instance NFData EventTriggerInfo
-$(deriveToJSON (aesonDrop 3 snakeCase) ''EventTriggerInfo)
-
-type EventTriggerInfoMap = M.HashMap TriggerName EventTriggerInfo
-
-data ViewInfo
-  = ViewInfo
-  { viIsUpdatable  :: !Bool
-  , viIsDeletable  :: !Bool
-  , viIsInsertable :: !Bool
-  } deriving (Show, Eq, Generic)
-instance NFData ViewInfo
-instance Cacheable ViewInfo
-$(deriveJSON (aesonDrop 2 snakeCase) ''ViewInfo)
-
-isMutable :: (ViewInfo -> Bool) -> Maybe ViewInfo -> Bool
-isMutable _ Nothing   = True
-isMutable f (Just vi) = f vi
-
-mutableView :: (MonadError QErr m) => QualifiedTable
-            -> (ViewInfo -> Bool) -> Maybe ViewInfo
-            -> T.Text -> m ()
-mutableView qt f mVI operation =
-  unless (isMutable f mVI) $ throw400 NotSupported $
-  "view " <> qt <<> " is not " <> operation
-
-data TableConfig
-  = TableConfig
-  { _tcCustomRootFields  :: !GC.TableCustomRootFields
-  , _tcCustomColumnNames :: !CustomColumnNames
-  } deriving (Show, Eq, Lift, Generic)
-instance NFData TableConfig
-instance Cacheable TableConfig
-$(deriveToJSON (aesonDrop 3 snakeCase) ''TableConfig)
-
-emptyTableConfig :: TableConfig
-emptyTableConfig =
-  TableConfig GC.emptyCustomRootFields M.empty
-
-instance FromJSON TableConfig where
-  parseJSON = withObject "TableConfig" $ \obj ->
-    TableConfig
-    <$> obj .:? "custom_root_fields" .!= GC.emptyCustomRootFields
-    <*> obj .:? "custom_column_names" .!= M.empty
-
--- | The @field@ and @primaryKeyColumn@ type parameters vary as the schema cache is built and more
--- information is accumulated. See 'TableRawInfo' and 'TableCoreInfo'.
-data TableCoreInfoG field primaryKeyColumn
-  = TableCoreInfo
-  { _tciName              :: !QualifiedTable
-  , _tciDescription       :: !(Maybe PGDescription)
-  , _tciSystemDefined     :: !SystemDefined
-  , _tciFieldInfoMap      :: !(FieldInfoMap field)
-  , _tciPrimaryKey        :: !(Maybe (PrimaryKey primaryKeyColumn))
-  , _tciUniqueConstraints :: !(HashSet Constraint)
-  -- ^ Does /not/ include the primary key; use 'tciUniqueOrPrimaryKeyConstraints' if you need both.
-  , _tciForeignKeys       :: !(HashSet ForeignKey)
-  , _tciViewInfo          :: !(Maybe ViewInfo)
-  , _tciEnumValues        :: !(Maybe EnumValues)
-  , _tciCustomConfig      :: !TableConfig
-  } deriving (Show, Eq, Generic)
-instance (Cacheable a, Cacheable b) => Cacheable (TableCoreInfoG a b)
-$(deriveToJSON (aesonDrop 4 snakeCase) ''TableCoreInfoG)
-$(makeLenses ''TableCoreInfoG)
-
--- | The result of the initial processing step for table info. Includes all basic information, but
--- is missing non-column fields.
-type TableRawInfo = TableCoreInfoG PGColumnInfo PGColumnInfo
--- | Fully-processed table info that includes non-column fields.
-type TableCoreInfo = TableCoreInfoG FieldInfo PGColumnInfo
-
-tciUniqueOrPrimaryKeyConstraints :: TableCoreInfoG a b -> [Constraint]
-tciUniqueOrPrimaryKeyConstraints info =
-  maybeToList (_pkConstraint <$> _tciPrimaryKey info) <> toList (_tciUniqueConstraints info)
-
-data TableInfo
-  = TableInfo
-  { _tiCoreInfo            :: TableCoreInfo
-  , _tiRolePermInfoMap     :: !RolePermInfoMap
-  , _tiEventTriggerInfoMap :: !EventTriggerInfoMap
-  } deriving (Show, Eq)
-$(deriveToJSON (aesonDrop 3 snakeCase) ''TableInfo)
-$(makeLenses ''TableInfo)
-
-checkForFieldConflict
-  :: (MonadError QErr m)
-  => TableCoreInfoG a b
-  -> FieldName
-  -> m ()
-checkForFieldConflict tableInfo f =
-  case M.lookup f (_tciFieldInfoMap tableInfo) of
-    Just _ -> throw400 AlreadyExists $ mconcat
-      [ "column/relationship/computed field " <>> f
-      , " of table " <>> _tciName tableInfo
-      , " already exists"
-      ]
-    Nothing -> return ()
-
-type TableCoreCache = M.HashMap QualifiedTable TableCoreInfo
-type TableCache = M.HashMap QualifiedTable TableInfo -- info of all tables
-type FunctionCache = M.HashMap QualifiedFunction FunctionInfo -- info of all functions
-
-data RemoteSchemaCtx
-  = RemoteSchemaCtx
-  { rscName :: !RemoteSchemaName
-  , rscGCtx :: !GC.RemoteGCtx
-  , rscInfo :: !RemoteSchemaInfo
-  } deriving (Show, Eq)
-
-instance ToJSON RemoteSchemaCtx where
-  toJSON = toJSON . rscInfo
+type RemoteSchemaCtx = RemoteSchemaCtxG (RemoteFieldInfo G.Name)
 
 type RemoteSchemaMap = M.HashMap RemoteSchemaName RemoteSchemaCtx
 
+type PartiallyResolvedRemoteSchemaCtx =
+  RemoteSchemaCtxG
+    (PartiallyResolvedRemoteRelationship RemoteRelationshipDefinition)
+
+type PartiallyResolvedRemoteSchemaMap =
+  M.HashMap RemoteSchemaName PartiallyResolvedRemoteSchemaCtx
+
 type DepMap = M.HashMap SchemaObjId (HS.HashSet SchemaDependency)
 
-newtype SchemaCacheVer
-  = SchemaCacheVer { unSchemaCacheVer :: Word64 }
+data CronTriggerInfo = CronTriggerInfo
+  { ctiName :: TriggerName,
+    ctiSchedule :: CronSchedule,
+    ctiPayload :: Maybe Value,
+    ctiRetryConf :: STRetryConf,
+    ctiWebhookInfo :: EnvRecord ResolvedWebhook,
+    ctiHeaders :: [EventHeaderInfo],
+    ctiComment :: Maybe Text,
+    ctiRequestTransform :: Maybe RequestTransform,
+    ctiResponseTransform :: Maybe MetadataResponseTransform
+  }
+  deriving (Show, Eq)
+
+$(deriveToJSON hasuraJSON ''CronTriggerInfo)
+
+newtype SchemaCacheVer = SchemaCacheVer {unSchemaCacheVer :: Word64}
   deriving (Show, Eq, Ord, Hashable, ToJSON, FromJSON)
 
 initSchemaCacheVer :: SchemaCacheVer
@@ -404,114 +250,538 @@ incSchemaCacheVer :: SchemaCacheVer -> SchemaCacheVer
 incSchemaCacheVer (SchemaCacheVer prev) =
   SchemaCacheVer $ prev + 1
 
-data SchemaCache
-  = SchemaCache
-  { scTables            :: !TableCache
-  , scFunctions         :: !FunctionCache
-  , scRemoteSchemas     :: !RemoteSchemaMap
-  , scAllowlist         :: !(HS.HashSet GQLQuery)
-  , scGCtxMap           :: !GC.GCtxMap
-  , scDefaultRemoteGCtx :: !GC.GCtx
-  , scDepMap            :: !DepMap
-  , scInconsistentObjs  :: ![InconsistentMetadata]
-  } deriving (Show, Eq)
-$(deriveToJSON (aesonDrop 2 snakeCase) ''SchemaCache)
+type ActionCache = M.HashMap ActionName ActionInfo -- info of all actions
 
-getFuncsOfTable :: QualifiedTable -> FunctionCache -> [FunctionInfo]
-getFuncsOfTable qt fc = flip filter allFuncs $ \f -> qt == fiReturnType f
+type InheritedRolesCache = M.HashMap RoleName (HashSet RoleName)
+
+-------------------------------------------------------------------------------
+
+-- | Retrieves the source info for a given source name.
+--
+-- This function retrieves the schema cache from the monadic context, and
+-- attempts to look the corresponding source up in the source cache. This
+-- function must be used with a _type annotation_, such as `askSourceInfo
+-- @('Postgres 'Vanilla)`. It throws an error if:
+-- 1. The function fails to find the named source at all
+-- 2. The named source exists but does not match the expected type
+-- 3. The named source exists, and is of the expected type, but is inconsistent
+askSourceInfo ::
+  forall b m.
+  (CacheRM m, MetadataM m, MonadError QErr m, Backend b) =>
+  SourceName ->
+  m (SourceInfo b)
+askSourceInfo sourceName = do
+  sources <- scSources <$> askSchemaCache
+  -- find any matching source info by name
+  case M.lookup sourceName sources of
+    -- 1. The function fails to find the named source at all
+    Nothing -> throw400 NotExists $ "source with name " <> sourceName <<> " does not exist"
+    Just matchingNameSourceInfo -> do
+      -- find matching source info for backend type @b
+      onNothing (unsafeSourceInfo @b matchingNameSourceInfo) do
+        metadata <- getMetadata
+        maybe
+          -- 2. The named source exists but does not match the expected type
+          ( throw400 NotExists $
+              "source with name "
+                <> sourceName <<> " has backend type "
+                <> T.toTxt (AB.lowerTag matchingNameSourceInfo)
+                  <<> " which does not match the expected type "
+                <> T.toTxt (reify $ backendTag @b)
+          )
+          -- 3. The named source exists, and is of the expected type, but is inconsistent
+          ( const $
+              throw400 Unexpected $
+                "source with name " <> sourceName <<> " is inconsistent"
+          )
+          (metadata ^. metaSources . at sourceName)
+
+askSourceInfoMaybe ::
+  forall b m.
+  (CacheRM m, Backend b) =>
+  SourceName ->
+  m (Maybe (SourceInfo b))
+askSourceInfoMaybe sourceName = do
+  sources <- scSources <$> askSchemaCache
+  pure (unsafeSourceInfo @b =<< M.lookup sourceName sources)
+
+-- | Retrieves the source config for a given source name.
+--
+-- This function relies on 'askSourceInfo' and similarly throws an error if the
+-- source isn't found.
+askSourceConfig ::
+  forall b m.
+  (CacheRM m, MonadError QErr m, Backend b, MetadataM m) =>
+  SourceName ->
+  m (SourceConfig b)
+askSourceConfig = fmap _siConfiguration . askSourceInfo @b
+
+askSourceConfigMaybe ::
+  forall b m.
+  (CacheRM m, Backend b) =>
+  SourceName ->
+  m (Maybe (SourceConfig b))
+askSourceConfigMaybe =
+  fmap (fmap _siConfiguration) . askSourceInfoMaybe @b
+
+-- | Retrieves the table cache for a given source cache and source name.
+--
+-- This function must be used with a _type annotation_, such as
+-- `unsafeTableCache @('Postgres 'Vanilla)`. It returns @Nothing@ if it fails to
+-- find that source or if the kind of the source does not match the type
+-- annotation, and does not distinguish between the two cases.
+unsafeTableCache ::
+  forall b. Backend b => SourceName -> SourceCache -> Maybe (TableCache b)
+unsafeTableCache sourceName cache = do
+  unsafeSourceTables @b =<< M.lookup sourceName cache
+
+-- | Retrieves the table cache for a given source name.
+--
+-- This function retrieves the schema cache from the monadic context, and
+-- attempts to look the corresponding source up in the source cache. It must be
+-- used with a _type annotation_, such as `unsafeTableCache @('Postgres
+-- 'Vanilla)`. It returns @Nothing@ if it fails to find that source or if the
+-- kind of the source does not match the type annotation, and does not
+-- distinguish between the two cases.
+askTableCache ::
+  forall b m.
+  (Backend b, CacheRM m) =>
+  SourceName ->
+  m (Maybe (TableCache b))
+askTableCache sourceName = do
+  sources <- scSources <$> askSchemaCache
+  pure $ unsafeSourceTables =<< M.lookup sourceName sources
+
+-- | Retrieves the information about a table from the source cache, the source
+-- name, and the table name.
+--
+-- This function returns @Nothing@ if it fails to find that source or if the
+-- kind of the source does not match the type annotation, and does not
+-- distinguish between the two cases.
+unsafeTableInfo ::
+  forall b. Backend b => SourceName -> TableName b -> SourceCache -> Maybe (TableInfo b)
+unsafeTableInfo sourceName tableName cache =
+  M.lookup tableName =<< unsafeTableCache @b sourceName cache
+
+-- | Retrieves the information about a table for a given source name and table
+-- name.
+--
+-- This function retrieves the schema cache from the monadic context, and
+-- attempts to look the corresponding source up in the source cache. it throws
+-- an error if it fails to find that source, in which case it looks that source
+-- up in the metadata, to differentiate between the source not existing or the
+-- type of the source not matching.
+askTableInfo ::
+  forall b m.
+  (QErrM m, CacheRM m, Backend b) =>
+  SourceName ->
+  TableName b ->
+  m (TableInfo b)
+askTableInfo sourceName tableName = do
+  rawSchemaCache <- askSchemaCache
+  onNothing (unsafeTableInfo sourceName tableName $ scSources rawSchemaCache) $
+    throw400 NotExists $
+      "table " <> tableName <<> " does not exist in source: " <> sourceNameToText sourceName
+
+-- | Similar to 'askTableInfo', but drills further down to extract the
+-- underlying core info.
+askTableCoreInfo ::
+  forall b m.
+  (QErrM m, CacheRM m, Backend b) =>
+  SourceName ->
+  TableName b ->
+  m (TableCoreInfo b)
+askTableCoreInfo sourceName tableName =
+  _tiCoreInfo <$> askTableInfo sourceName tableName
+
+-- | Similar to 'askTableCoreInfo', but drills further down to extract the
+-- underlying field info map.
+askTableFieldInfoMap ::
+  forall b m.
+  (QErrM m, CacheRM m, Backend b) =>
+  SourceName ->
+  TableName b ->
+  m (FieldInfoMap (FieldInfo b))
+askTableFieldInfoMap sourceName tableName =
+  _tciFieldInfoMap <$> askTableCoreInfo sourceName tableName
+
+-- | Retrieves the metadata information about a table for a given source name
+-- and table name.
+--
+-- Unlike most other @ask@ functions in this module, this function does not
+-- drill through the schema cache, and instead inspects the metadata. Like most
+-- others, it throws an error if it fails to find that source, in which case it
+-- looks that source up in the metadata, to differentiate between the source not
+-- existing or the type of the source not matching.
+askTableMetadata ::
+  forall b m.
+  (QErrM m, MetadataM m, Backend b) =>
+  SourceName ->
+  TableName b ->
+  m (TableMetadata b)
+askTableMetadata sourceName tableName = do
+  onNothingM (getMetadata <&> preview focusTableMetadata) $
+    throw400 NotExists $
+      "table " <> tableName <<> " does not exist in source: " <> sourceNameToText sourceName
   where
-    allFuncs = M.elems fc
+    focusTableMetadata :: Traversal' Metadata (TableMetadata b)
+    focusTableMetadata =
+      metaSources
+        . ix sourceName
+        . toSourceMetadata @b
+        . smTables
+        . ix tableName
+
+-- | Retrieves the function cache for a given source cache and source name.
+--
+-- This function must be used with a _type annotation_, such as
+-- `unsafeFunctionCache @('Postgres 'Vanilla)`. It returns @Nothing@ if it fails
+-- to find that source or if the kind of the source does not match the type
+-- annotation, and does not distinguish between the two cases.
+unsafeFunctionCache ::
+  forall b. Backend b => SourceName -> SourceCache -> Maybe (FunctionCache b)
+unsafeFunctionCache sourceName cache =
+  unsafeSourceFunctions @b =<< M.lookup sourceName cache
+
+-- | Retrieves the information about a function from the source cache, the
+-- source name, and the function name.
+--
+-- This function returns @Nothing@ if it fails to find that source or if the
+-- kind of the source does not match the type annotation, and does not
+-- distinguish between the two cases.
+unsafeFunctionInfo ::
+  forall b. Backend b => SourceName -> FunctionName b -> SourceCache -> Maybe (FunctionInfo b)
+unsafeFunctionInfo sourceName functionName cache =
+  M.lookup functionName =<< unsafeFunctionCache @b sourceName cache
+
+-- | Retrieves the information about a function cache for a given source name
+-- and function name.
+--
+-- This function retrieves the schema cache from the monadic context, and
+-- attempts to look the corresponding source up in the source cache. It throws
+-- an error if it fails to find that source, in which case it looks that source
+-- up in the metadata, to differentiate between the source not existing or the
+-- type of the source not matching.
+askFunctionInfo ::
+  forall b m.
+  (QErrM m, CacheRM m, Backend b) =>
+  SourceName ->
+  FunctionName b ->
+  m (FunctionInfo b)
+askFunctionInfo sourceName functionName = do
+  rawSchemaCache <- askSchemaCache
+  onNothing (unsafeFunctionInfo sourceName functionName $ scSources rawSchemaCache) $
+    throw400 NotExists $
+      "function " <> functionName <<> " does not exist in source: " <> sourceNameToText sourceName
+
+-------------------------------------------------------------------------------
+
+newtype BackendInfoWrapper (b :: BackendType) = BackendInfoWrapper {unBackendInfoWrapper :: BackendInfo b}
+
+deriving newtype instance (ToJSON (BackendInfo b)) => ToJSON (BackendInfoWrapper b)
+
+deriving newtype instance (Semigroup (BackendInfo b)) => Semigroup (BackendInfoWrapper b)
+
+deriving newtype instance (Monoid (BackendInfo b)) => Monoid (BackendInfoWrapper b)
+
+type BackendCache = BackendMap BackendInfoWrapper
+
+getBackendInfo :: forall b m. (CacheRM m, HasTag b) => m (Maybe (BackendInfo b))
+getBackendInfo = askSchemaCache <&> fmap unBackendInfoWrapper . BackendMap.lookup @b . scBackendCache
+
+-------------------------------------------------------------------------------
+
+data SchemaCache = SchemaCache
+  { scSources :: SourceCache,
+    scActions :: ActionCache,
+    scRemoteSchemas :: RemoteSchemaMap,
+    scAllowlist :: InlinedAllowlist,
+    scAdminIntrospection :: G.SchemaIntrospection,
+    scGQLContext :: HashMap RoleName (RoleContext GQLContext),
+    scUnauthenticatedGQLContext :: GQLContext,
+    scRelayContext :: HashMap RoleName (RoleContext GQLContext),
+    scUnauthenticatedRelayContext :: GQLContext,
+    scDepMap :: DepMap,
+    scInconsistentObjs :: [InconsistentMetadata],
+    scCronTriggers :: M.HashMap TriggerName CronTriggerInfo,
+    scEndpoints :: EndpointTrie GQLQueryWithText,
+    scApiLimits :: ApiLimit,
+    scMetricsConfig :: MetricsConfig,
+    scMetadataResourceVersion :: Maybe MetadataResourceVersion,
+    scSetGraphqlIntrospectionOptions :: SetGraphqlIntrospectionOptions,
+    scTlsAllowlist :: [TlsAllow],
+    scQueryCollections :: QueryCollections,
+    scBackendCache :: BackendCache,
+    scSourceHealthChecks :: SourceHealthCheckCache,
+    scSourcePingConfig :: SourcePingCache,
+    scOpenTelemetryConfig :: OpenTelemetryInfo
+  }
+
+-- WARNING: this can only be used for debug purposes, as it loses all
+-- backend-specific information in the process!
+instance ToJSON SchemaCache where
+  toJSON SchemaCache {..} =
+    object
+      [ "sources" .= toJSON (AB.debugAnyBackendToJSON <$> scSources),
+        "actions" .= toJSON scActions,
+        "remote_schemas" .= toJSON scRemoteSchemas,
+        "allowlist" .= toJSON scAllowlist,
+        "g_q_l_context" .= toJSON scGQLContext,
+        "unauthenticated_g_q_l_context" .= toJSON scUnauthenticatedGQLContext,
+        "relay_context" .= toJSON scRelayContext,
+        "unauthenticated_relay_context" .= toJSON scUnauthenticatedRelayContext,
+        "dep_map" .= toJSON scDepMap,
+        "inconsistent_objs" .= toJSON scInconsistentObjs,
+        "cron_triggers" .= toJSON scCronTriggers,
+        "endpoints" .= toJSON scEndpoints,
+        "api_limits" .= toJSON scApiLimits,
+        "metrics_config" .= toJSON scMetricsConfig,
+        "metadata_resource_version" .= toJSON scMetadataResourceVersion,
+        "set_graphql_introspection_options" .= toJSON scSetGraphqlIntrospectionOptions,
+        "tls_allowlist" .= toJSON scTlsAllowlist,
+        "query_collection" .= toJSON scQueryCollections,
+        "backend_cache" .= toJSON scBackendCache
+      ]
+
+getAllRemoteSchemas :: SchemaCache -> [RemoteSchemaName]
+getAllRemoteSchemas sc =
+  let consistentRemoteSchemas = M.keys $ scRemoteSchemas sc
+      inconsistentRemoteSchemas =
+        getInconsistentRemoteSchemas $ scInconsistentObjs sc
+   in consistentRemoteSchemas <> inconsistentRemoteSchemas
 
 -- | A more limited version of 'CacheRM' that is used when building the schema cache, since the
 -- entire schema cache has not been built yet.
-class (Monad m) => TableCoreInfoRM m where
-  lookupTableCoreInfo :: QualifiedTable -> m (Maybe TableCoreInfo)
-  default lookupTableCoreInfo :: (CacheRM m) => QualifiedTable -> m (Maybe TableCoreInfo)
-  lookupTableCoreInfo tableName = fmap _tiCoreInfo . M.lookup tableName . scTables <$> askSchemaCache
+class Monad m => TableCoreInfoRM b m where
+  lookupTableCoreInfo :: TableName b -> m (Maybe (TableCoreInfo b))
 
-instance (TableCoreInfoRM m) => TableCoreInfoRM (ReaderT r m) where
-  lookupTableCoreInfo = lift . lookupTableCoreInfo
-instance (TableCoreInfoRM m) => TableCoreInfoRM (StateT s m) where
-  lookupTableCoreInfo = lift . lookupTableCoreInfo
-instance (Monoid w, TableCoreInfoRM m) => TableCoreInfoRM (WriterT w m) where
+instance (TableCoreInfoRM b m) => TableCoreInfoRM b (ReaderT r m) where
   lookupTableCoreInfo = lift . lookupTableCoreInfo
 
-newtype TableCoreCacheRT m a
-  = TableCoreCacheRT { runTableCoreCacheRT :: Dependency TableCoreCache -> m a }
-  deriving (Functor, Applicative, Monad, MonadIO, MonadError e, MonadState s, MonadWriter w, MonadTx)
-    via (ReaderT (Dependency TableCoreCache) m)
-  deriving (MonadTrans) via (ReaderT (Dependency TableCoreCache))
+instance (TableCoreInfoRM b m) => TableCoreInfoRM b (StateT s m) where
+  lookupTableCoreInfo = lift . lookupTableCoreInfo
 
-instance (MonadReader r m) => MonadReader r (TableCoreCacheRT m) where
+instance (Monoid w, TableCoreInfoRM b m) => TableCoreInfoRM b (WriterT w m) where
+  lookupTableCoreInfo = lift . lookupTableCoreInfo
+
+instance (TableCoreInfoRM b m) => TableCoreInfoRM b (TraceT m) where
+  lookupTableCoreInfo = lift . lookupTableCoreInfo
+
+newtype TableCoreCacheRT b m a = TableCoreCacheRT {runTableCoreCacheRT :: TableCoreCache b -> m a}
+  deriving
+    (Functor, Applicative, Monad, MonadIO, MonadError e, MonadState s, MonadWriter w, Postgres.MonadTx)
+    via (ReaderT (TableCoreCache b) m)
+  deriving (MonadTrans) via (ReaderT (TableCoreCache b))
+
+instance (MonadReader r m) => MonadReader r (TableCoreCacheRT b m) where
   ask = lift ask
   local f m = TableCoreCacheRT (local f . runTableCoreCacheRT m)
-instance (MonadDepend m) => TableCoreInfoRM (TableCoreCacheRT m) where
-  lookupTableCoreInfo tableName = TableCoreCacheRT (dependOnM . selectKeyD tableName)
 
-class (TableCoreInfoRM m) => CacheRM m where
+instance (Monad m, Backend b) => TableCoreInfoRM b (TableCoreCacheRT b m) where
+  lookupTableCoreInfo tableName =
+    TableCoreCacheRT (pure . M.lookup tableName)
+
+-- | All our RQL DML queries operate over a single source. This typeclass facilitates that.
+class (TableCoreInfoRM b m) => TableInfoRM b m where
+  lookupTableInfo :: TableName b -> m (Maybe (TableInfo b))
+
+instance (TableInfoRM b m) => TableInfoRM b (ReaderT r m) where
+  lookupTableInfo tableName = lift $ lookupTableInfo tableName
+
+instance (TableInfoRM b m) => TableInfoRM b (StateT s m) where
+  lookupTableInfo tableName = lift $ lookupTableInfo tableName
+
+instance (Monoid w, TableInfoRM b m) => TableInfoRM b (WriterT w m) where
+  lookupTableInfo tableName = lift $ lookupTableInfo tableName
+
+instance (TableInfoRM b m) => TableInfoRM b (TraceT m) where
+  lookupTableInfo tableName = lift $ lookupTableInfo tableName
+
+newtype TableCacheRT b m a = TableCacheRT {runTableCacheRT :: TableCache b -> m a}
+  deriving
+    (Functor, Applicative, Monad, MonadIO, MonadError e, MonadState s, MonadWriter w, Postgres.MonadTx, UserInfoM, HasServerConfigCtx)
+    via (ReaderT (TableCache b) m)
+  deriving (MonadTrans) via (ReaderT (TableCache b))
+
+instance (Monad m, Backend b) => TableCoreInfoRM b (TableCacheRT b m) where
+  lookupTableCoreInfo tableName =
+    TableCacheRT (pure . fmap _tiCoreInfo . M.lookup tableName)
+
+instance (Monad m, Backend b) => TableInfoRM b (TableCacheRT b m) where
+  lookupTableInfo tableName =
+    TableCacheRT (pure . M.lookup tableName)
+
+class (Monad m) => CacheRM m where
   askSchemaCache :: m SchemaCache
 
 instance (CacheRM m) => CacheRM (ReaderT r m) where
   askSchemaCache = lift askSchemaCache
+
 instance (CacheRM m) => CacheRM (StateT s m) where
   askSchemaCache = lift askSchemaCache
+
 instance (Monoid w, CacheRM m) => CacheRM (WriterT w m) where
   askSchemaCache = lift askSchemaCache
 
-newtype CacheRT m a = CacheRT { runCacheRT :: SchemaCache -> m a }
-  deriving (Functor, Applicative, Monad, MonadError e, MonadWriter w) via (ReaderT SchemaCache m)
-  deriving (MonadTrans) via (ReaderT SchemaCache)
-instance (Monad m) => TableCoreInfoRM (CacheRT m)
-instance (Monad m) => CacheRM (CacheRT m) where
-  askSchemaCache = CacheRT pure
+instance (CacheRM m) => CacheRM (TraceT m) where
+  askSchemaCache = lift askSchemaCache
 
-data PermAccessor a where
-  PAInsert :: PermAccessor InsPermInfo
-  PASelect :: PermAccessor SelPermInfo
-  PAUpdate :: PermAccessor UpdPermInfo
-  PADelete :: PermAccessor DelPermInfo
+instance (CacheRM m) => CacheRM (PG.TxET QErr m) where
+  askSchemaCache = lift askSchemaCache
 
-permAccToLens :: PermAccessor a -> Lens' RolePermInfo (Maybe a)
-permAccToLens PAInsert = permIns
-permAccToLens PASelect = permSel
-permAccToLens PAUpdate = permUpd
-permAccToLens PADelete = permDel
-
-permAccToType :: PermAccessor a -> PermType
-permAccToType PAInsert = PTInsert
-permAccToType PASelect = PTSelect
-permAccToType PAUpdate = PTUpdate
-permAccToType PADelete = PTDelete
-
-withPermType :: PermType -> (forall a. PermAccessor a -> b) -> b
-withPermType PTInsert f = f PAInsert
-withPermType PTSelect f = f PASelect
-withPermType PTUpdate f = f PAUpdate
-withPermType PTDelete f = f PADelete
-
-askFunctionInfo
-  :: (CacheRM m, QErrM m)
-  => QualifiedFunction ->  m FunctionInfo
-askFunctionInfo qf = do
-  sc <- askSchemaCache
-  maybe throwNoFn return $ M.lookup qf $ scFunctions sc
-  where
-    throwNoFn = throw400 NotExists $
-      "function not found in cache " <>> qf
+instance (CacheRM m) => CacheRM (MSSQL.TxET e m) where
+  askSchemaCache = lift askSchemaCache
 
 getDependentObjs :: SchemaCache -> SchemaObjId -> [SchemaObjId]
 getDependentObjs = getDependentObjsWith (const True)
 
-getDependentObjsWith
-  :: (DependencyReason -> Bool) -> SchemaCache -> SchemaObjId -> [SchemaObjId]
+getDependentObjsWith ::
+  (DependencyReason -> Bool) -> SchemaCache -> SchemaObjId -> [SchemaObjId]
 getDependentObjsWith f sc objId =
-  -- [ sdObjId sd | sd <- filter (f . sdReason) allDeps]
   map fst $ filter (isDependency . snd) $ M.toList $ scDepMap sc
   where
-    isDependency deps = not $ HS.null $ flip HS.filter deps $
-      \(SchemaDependency depId reason) -> objId `induces` depId && f reason
+    isDependency deps = not $
+      HS.null $
+        flip HS.filter deps $
+          \(SchemaDependency depId reason) -> objId `induces` depId && f reason
     -- induces a b : is b dependent on a
-    induces (SOTable tn1) (SOTable tn2)      = tn1 == tn2
-    induces (SOTable tn1) (SOTableObj tn2 _) = tn1 == tn2
-    induces objId1 objId2                    = objId1 == objId2
-    -- allDeps = toList $ fromMaybe HS.empty $ M.lookup objId $ scDepMap sc
+    induces (SOSource s1) (SOSource s2) = s1 == s2
+    induces (SOSource s1) (SOSourceObj s2 _) = s1 == s2
+    induces o1@(SOSourceObj s1 e1) o2@(SOSourceObj s2 e2) =
+      s1 == s2 && fromMaybe (o1 == o2) (AB.composeAnyBackend @Backend go e1 e2 Nothing)
+    induces o1 o2 = o1 == o2
+
+    go (SOITable tn1) (SOITable tn2) = Just $ tn1 == tn2
+    go (SOITable tn1) (SOITableObj tn2 _) = Just $ tn1 == tn2
+    go _ _ = Nothing
+
+-- | Compute all remote dependencies on a source.
+--
+-- Given a source name, this function computes all of its dependencies, direct
+-- or indirect, and returns all of the dependencies that are not "local" to the
+-- source, i.e. that belong to another source or to a remote schema, here dubbed
+-- "remote dependencies".
+--
+-- This functions returns a 'SchemaObjId' for each such dependency, but makes no
+-- attempt at extracting the underlying `SourceObjId` (if any), for two reasons:
+--   1. a `SourceObjId` no longer contains the source name, which most callers
+--      need to identify where the corresponding dependency is
+--   2. this would prevent us from returning remote schema dependencies, which
+--      by definition do not have a corresponding `SourceObjId`
+getRemoteDependencies ::
+  SchemaCache ->
+  SourceName ->
+  [SchemaObjId]
+getRemoteDependencies schemaCache sourceName =
+  filter isRemoteDep $ getDependentObjs schemaCache (SOSource sourceName)
+  where
+    isRemoteDep = \case
+      SOSourceObj sn _
+        -- only true if the dependency is in another source
+        | sn /= sourceName -> True
+        | otherwise -> False
+      SORemoteSchemaRemoteRelationship {} -> True
+      -- those relationshipss either do not exist or do not qualify as remote
+      SOSource {} -> False
+      SORemoteSchema {} -> False
+      SORemoteSchemaPermission {} -> False
+      SORole {} -> False
+
+-- | Discover the schema dependencies of an @AnnBoolExpPartialSQL@.
+getBoolExpDeps ::
+  forall b.
+  (GetAggregationPredicatesDeps b) =>
+  SourceName ->
+  TableName b ->
+  AnnBoolExpPartialSQL b ->
+  [SchemaDependency]
+getBoolExpDeps source tableName =
+  runBoolExpM (BoolExpCtx {source = source, currTable = tableName, rootTable = tableName}) . getBoolExpDeps'
+
+getBoolExpDeps' ::
+  forall b.
+  (GetAggregationPredicatesDeps b) =>
+  AnnBoolExpPartialSQL b ->
+  BoolExpM b [SchemaDependency]
+getBoolExpDeps' = \case
+  BoolAnd exps -> procExps exps
+  BoolOr exps -> procExps exps
+  BoolNot e -> getBoolExpDeps' e
+  BoolField fld -> getColExpDeps fld
+  BoolExists (GExists refqt whereExp) -> do
+    BoolExpCtx {source} <- ask
+    let tableDep =
+          SchemaDependency
+            ( SOSourceObj source $
+                AB.mkAnyBackend $
+                  SOITable @b refqt
+            )
+            DRRemoteTable
+    (tableDep :) <$> local (\e -> e {currTable = refqt}) (getBoolExpDeps' whereExp)
+  where
+    procExps :: [AnnBoolExpPartialSQL b] -> BoolExpM b [SchemaDependency]
+    procExps = fmap concat . mapM getBoolExpDeps'
+
+getColExpDeps ::
+  forall b.
+  (GetAggregationPredicatesDeps b) =>
+  AnnBoolExpFld b (PartialSQLExp b) ->
+  BoolExpM b [SchemaDependency]
+getColExpDeps bexp = do
+  BoolExpCtx {source, currTable} <- ask
+  case bexp of
+    AVColumn colInfo opExps ->
+      let columnName = ciColumn colInfo
+          colDepReason = bool DRSessionVariable DROnType $ any hasStaticExp opExps
+          colDep = mkColDep @b colDepReason source currTable columnName
+       in (colDep :) <$> getOpExpDeps opExps
+    AVRelationship relInfo relBoolExp ->
+      let relationshipName = riName relInfo
+          relationshipTable = riRTable relInfo
+          schemaDependency =
+            SchemaDependency
+              ( SOSourceObj source $
+                  AB.mkAnyBackend $
+                    SOITableObj @b currTable (TORel relationshipName)
+              )
+              DROnType
+       in (schemaDependency :) <$> local (\e -> e {currTable = relationshipTable}) (getBoolExpDeps' relBoolExp)
+    AVComputedField computedFieldBoolExp ->
+      let mkComputedFieldDep' r =
+            mkComputedFieldDep @b r source currTable $ _acfbName computedFieldBoolExp
+       in case _acfbBoolExp computedFieldBoolExp of
+            CFBEScalar opExps ->
+              let computedFieldDep =
+                    mkComputedFieldDep' $
+                      bool DRSessionVariable DROnType $
+                        any hasStaticExp opExps
+               in (computedFieldDep :) <$> getOpExpDeps opExps
+            CFBETable cfTable cfTableBoolExp ->
+              (mkComputedFieldDep' DROnType :) <$> local (\e -> e {currTable = cfTable}) (getBoolExpDeps' cfTableBoolExp)
+    AVAggregationPredicates aggPreds -> getAggregationPredicateDeps aggPreds
+
+getOpExpDeps ::
+  forall b.
+  (Backend b) =>
+  [OpExpG b (PartialSQLExp b)] ->
+  BoolExpM b [SchemaDependency]
+getOpExpDeps opExps = do
+  BoolExpCtx {source, rootTable, currTable} <- ask
+  pure $ do
+    RootOrCurrentColumn rootOrCol col <- mapMaybe opExpDepCol opExps
+    let table = case rootOrCol of
+          IsRoot -> rootTable
+          IsCurrent -> currTable
+    pure $ mkColDep @b DROnType source table col
+
+-- | Asking for a table's fields info without explicit @'SourceName' argument.
+-- The source name is implicitly inferred from @'SourceM' via @'TableCoreInfoRM'.
+askFieldInfoMapSource ::
+  (QErrM m, Backend b, TableCoreInfoRM b m) =>
+  TableName b ->
+  m (FieldInfoMap (FieldInfo b))
+askFieldInfoMapSource tableName = do
+  fmap _tciFieldInfoMap $
+    onNothingM (lookupTableCoreInfo tableName) $
+      throw400 NotExists $
+        "table " <> tableName <<> " does not exist"

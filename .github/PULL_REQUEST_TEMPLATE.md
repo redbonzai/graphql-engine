@@ -5,17 +5,29 @@
 <!-- The title might not be enough to convey how this change affects the user. -->
 <!-- Describe the changes from a user's perspective -->
 
-### Affected components
-<!-- Remove non-affected components from the list -->
+### Changelog
 
-- [ ] Server
-- [ ] Console
-- [ ] CLI
-- [ ] Docs
-- [ ] Community Content
-- [ ] Build System
-- [ ] Tests
-- [ ] Other (list it)
+<!-- Fill this section if this is a user facing change. -->
+
+__Component__ : server / cli / console / build <!-- choose one -->
+
+__Type__: bugfix / feature / enhancement <!-- choose one -->
+
+__Product__: community-edition
+
+#### Short Changelog
+
+<!-- One line description of this change. (optional if you choose to fill the Long Changelog section instead) -->
+
+#### Long Changelog
+
+<!--
+  Detailed description of this change. This might contain links to documentation, blogposts, images. Use markdown for formatting.
+  (optional if you choose to fill the Short Changelog section instead)
+-->
+
+
+<!-- Changelog Section End -->
 
 ### Related Issues
 <!-- Please make sure you have an issue associated with this Pull Request -->
@@ -42,7 +54,7 @@
 Does this PR change Hasura Catalog version?
 - [ ] No
 - [ ] Yes
-  - [ ] Updated docs with SQL for downgrading the catalog <!-- https://docs.hasura.io/1.0/graphql/manual/deployment/downgrading.html#downgrading-across-catalogue-versions -->
+  - [ ] Updated docs with SQL for downgrading the catalog <!-- https://hasura.io/docs/latest/graphql/core/deployment/downgrading.html#downgrading-across-catalogue-versions -->
 
 #### Metadata
 <!-- Hasura metadata changes -->

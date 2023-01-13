@@ -1,0 +1,34 @@
+{-# LANGUAGE DeriveAnyClass #-}
+
+--
+module Hasura.Backends.DataConnector.API.V0.Scalar
+  ( ScalarType (..),
+  )
+where
+
+--------------------------------------------------------------------------------
+
+import Autodocodec
+import Autodocodec.OpenAPI ()
+import Control.DeepSeq (NFData)
+import Data.Aeson (FromJSON, FromJSONKey (..), FromJSONKeyFunction (..), ToJSON, ToJSONKey (..), ToJSONKeyFunction (..))
+import Data.Aeson.Encoding qualified as Encoding
+import Data.Aeson.Key qualified as Key
+import Data.Hashable (Hashable)
+import Data.OpenApi (ToSchema)
+import Data.Text (Text)
+import GHC.Generics (Generic)
+import Prelude
+
+--------------------------------------------------------------------------------
+
+newtype ScalarType = ScalarType {getScalarType :: Text}
+  deriving stock (Eq, Generic, Ord, Show)
+  deriving anyclass (Hashable, NFData)
+  deriving newtype (FromJSONKey, ToJSONKey)
+  deriving (FromJSON, ToJSON, ToSchema) via Autodocodec ScalarType
+
+instance HasCodec ScalarType where
+  codec =
+    named "ScalarType" $
+      dimapCodec ScalarType getScalarType textCodec

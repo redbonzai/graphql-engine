@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hasura/graphql-engine/cli"
+	"github.com/hasura/graphql-engine/cli/v2"
+	"github.com/hasura/graphql-engine/cli/v2/internal/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -12,7 +13,7 @@ import (
 const completionCmdExample = `# Bash
     # Linux
       # Add Bash completion file using:
-      $ sudo hasura completion bash --file=/etc/bash.completion.d/hasura
+      $ sudo hasura completion bash --file=/etc/bash_completion.d/hasura
     # Mac
       # Install bash-completion using homebrew:
       $ brew install bash-completion
@@ -46,24 +47,31 @@ func NewCompletionCmd(ec *cli.ExecutionContext) *cobra.Command {
 	}
 	completionCmd := &cobra.Command{
 		Use:          "completion [shell]",
-		Short:        "Generate auto completion code",
+		Short:        "Generate auto-completion code",
 		Args:         cobra.ExactArgs(1),
-		Long:         "Output shell completion code for the specified shell (bash or zsh)",
+		Long:         "Depending on your shell (bash or zsh), running `hasura completion [shell]` will generate the auto-completion code for the Hasura CLI. You can then add this to your shell config to enable auto-completion, which will allow you to tab through the available commands and options.",
 		SilenceUsage: true,
 		Example:      completionCmdExample,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			op := genOpName(cmd, "PreRunE")
 			ec.Viper = viper.New()
-			return ec.Prepare()
+			if err := ec.Prepare(); err != nil {
+				return errors.E(op, err)
+			}
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			op := genOpName(cmd, "RunE")
 			opts.Shell = args[0]
 			opts.Cmd = cmd
-			return opts.run()
+			if err := opts.run(); err != nil {
+				return errors.E(op, err)
+			}
+			return nil
 		},
 	}
 
 	completionCmd.Flags().StringVar(&opts.File, "file", "", "file to which output has to be written")
-	completionCmd.MarkFlagFilename("file")
 	return completionCmd
 }
 
@@ -76,6 +84,7 @@ type completionOptions struct {
 }
 
 func (o *completionOptions) run() error {
+	var op errors.Op = "commands.completionOptions.run"
 	var err error
 	switch o.Shell {
 	case "bash":
@@ -91,10 +100,10 @@ func (o *completionOptions) run() error {
 			err = o.Cmd.Root().GenZshCompletion(os.Stdout)
 		}
 	default:
-		err = fmt.Errorf("Unknown shell: %s. Use bash or zsh", o.Shell)
+		err = fmt.Errorf("unknown shell: %s. Use bash or zsh", o.Shell)
 	}
 	if err != nil {
-		return err
+		return errors.E(op, err)
 	}
 	return nil
 }

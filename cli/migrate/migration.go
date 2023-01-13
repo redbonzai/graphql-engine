@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"io"
 	"time"
+
+	"github.com/hasura/graphql-engine/cli/v2/internal/errors"
 )
 
 // DefaultBufferSize sets the in memory buffer size (in Bytes) for every
@@ -111,6 +113,7 @@ func NewMigration(body io.ReadCloser, identifier string, version uint64, targetV
 // Buffer buffers Body up to BufferSize.
 // Calling this function blocks. Call with goroutine.
 func (m *Migration) Buffer() error {
+	var op errors.Op = "migrate.Migration.Buffer"
 	if m.Body == nil {
 		return nil
 	}
@@ -121,7 +124,9 @@ func (m *Migration) Buffer() error {
 
 	// start reading from body, peek won't move the read pointer though
 	// poor man's solution?
-	b.Peek(int(m.BufferSize))
+	if _, err := b.Peek(int(m.BufferSize)); err != nil && err != io.EOF {
+		return errors.E(op, err)
+	}
 
 	m.FinishedBuffering = time.Now()
 
@@ -129,7 +134,7 @@ func (m *Migration) Buffer() error {
 	// something starts reading from m.Buffer
 	n, err := b.WriteTo(m.bufferWriter)
 	if err != nil {
-		return err
+		return errors.E(op, err)
 	}
 
 	m.FinishedReading = time.Now()

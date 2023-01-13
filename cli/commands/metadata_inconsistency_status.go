@@ -1,52 +1,41 @@
 package commands
 
 import (
-	"github.com/hasura/graphql-engine/cli"
-	"github.com/pkg/errors"
+	"fmt"
+
+	"github.com/hasura/graphql-engine/cli/v2"
+	"github.com/hasura/graphql-engine/cli/v2/internal/errors"
+	"github.com/hasura/graphql-engine/cli/v2/internal/projectmetadata"
+
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func newMetadataInconsistencyStatusCmd(ec *cli.ExecutionContext) *cobra.Command {
-	v := viper.New()
 	opts := &metadataInconsistencyListOptions{
 		EC: ec,
 	}
 
 	metadataInconsistencyStatusCmd := &cobra.Command{
 		Use:          "status",
-		Short:        "Check if the metadata is inconsistent or not",
+		Short:        "Check if the Hasura Metadata is inconsistent or not",
+		Long:         "At times, when developing, the Hasura Metadata can become inconsistent. This command can be used to check if the Metadata is inconsistent or not.",
 		SilenceUsage: true,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			ec.Viper = v
-			return ec.Validate()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			op := genOpName(cmd, "RunE")
 			opts.EC.Spin("reading metadata status...")
-			err := opts.read()
+			err := opts.read(projectmetadata.NewHandlerFromEC(ec))
 			opts.EC.Spinner.Stop()
 			if err != nil {
-				return errors.Wrap(err, "failed to read metadata status")
+				return errors.E(op, fmt.Errorf("failed to read metadata status: %w", err))
 			}
 			if opts.isConsistent {
 				opts.EC.Logger.Println("metadata is consistent")
 			} else {
-				return errors.New("metadata is inconsistent, use list command to see the objects")
+				return errors.E(op, "metadata is inconsistent, use 'hasura metadata ic list' command to see the inconsistent objects")
 			}
 			return nil
 		},
 	}
-
-	f := metadataInconsistencyStatusCmd.Flags()
-	f.String("endpoint", "", "http(s) endpoint for Hasura GraphQL Engine")
-	f.String("admin-secret", "", "admin secret for Hasura GraphQL Engine")
-	f.String("access-key", "", "access key for Hasura GraphQL Engine")
-	f.MarkDeprecated("access-key", "use --admin-secret instead")
-
-	// need to create a new viper because https://github.com/spf13/viper/issues/233
-	v.BindPFlag("endpoint", f.Lookup("endpoint"))
-	v.BindPFlag("admin_secret", f.Lookup("admin-secret"))
-	v.BindPFlag("access_key", f.Lookup("access-key"))
 
 	return metadataInconsistencyStatusCmd
 }

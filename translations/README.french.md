@@ -1,6 +1,6 @@
 # Hasura GraphQL Engine
 
-[![Docs](https://img.shields.io/badge/docs-v1.0-brightgreen.svg?style=flat)](https://docs.hasura.io)
+[![Docs](https://img.shields.io/badge/docs-v1.0-brightgreen.svg?style=flat)](https://hasura.io/docs)
 [![CircleCI](https://circleci.com/gh/hasura/graphql-engine.svg?style=shield)](https://circleci.com/gh/hasura/graphql-engine)
 
 
@@ -13,7 +13,7 @@ Hasura GraphQL Engine est un serveur GraphQL ultra-rapide qui vous permet de cr�
 Hasura vous aide à construire des applications GraphQL basées sur Posgres ou à adopter graduellement GraphQL pour des applications existantes utilisant Postgres.
 
 
-Plus d'informations sur [hasura.io](https://hasura.io) et dans la [documentation](https://docs.hasura.io).
+Plus d'informations sur [hasura.io](https://hasura.io) et dans la [documentation](https://hasura.io/docs).
 
 ------------------
 
@@ -37,7 +37,7 @@ Plus d'informations sur [hasura.io](https://hasura.io) et dans la [documentation
 * **Interface d'administration & Migrations**: Interface d'administration & migrations de schéma à la Rails.
 * **Postgres** ❤️: Supporte les types Postgres (PostGIS/geo-location, etc.), transforme les vues en *graphs*, déclenche des procédures ou fonctions stockées via les mutations.
 
-Plus d'informations sur [hasura.io](https://hasura.io) et dans la [documentation](https://docs.hasura.io).
+Plus d'informations sur [hasura.io](https://hasura.io) et dans la [documentation](https://hasura.io/docs).
 
 ## Table des matières
 <!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
@@ -77,11 +77,11 @@ La manière la plus rapide d'essayer Hasura est via Heroku.
 
 3. Réalisez votre première requête GraphQL
 
-   Créez une table et réalisez votre première requête. Suivez ce [guide](https://docs.hasura.io/1.0/graphql/manual/getting-started/first-graphql-query.html).
+   Créez une table et réalisez votre première requête. Suivez ce [guide](https://hasura.io/docs/latest/graphql/core/getting-started/first-graphql-query.html).
 
 ### Autres méthodes de déploiement
 
-Pour les méthodes de déploiement basées sur Docker et les options de configuration avancées, consultez les [guides de déploiement](https://docs.hasura.io/1.0/graphql/manual/getting-started/index.html) ou les [manifestes d'installation](../install-manifests).
+Pour les méthodes de déploiement basées sur Docker et les options de configuration avancées, consultez les [guides de déploiement](https://hasura.io/docs/latest/graphql/core/getting-started/index.html) ou les [manifestes d'installation](../install-manifests).
 
 ## Architecture
 
@@ -111,7 +111,7 @@ traitements asynchrones - [plus d'informations](event-triggers.french.md).
 
 ### Données dérivée ou transformations de données
 
-Transformez les données dans Postgres ou exécutez de la logique métier dessus pour en deriver un autre jeu de données qui peut être requêté à l'aide de GraphQL Engine - [plus d'informations](https://docs.hasura.io/1.0/graphql/manual/queries/derived-data.html).
+Transformez les données dans Postgres ou exécutez de la logique métier dessus pour en deriver un autre jeu de données qui peut être requêté à l'aide de GraphQL Engine - [plus d'informations](https://hasura.io/docs/latest/graphql/core/queries/derived-data.html).
 
 ## Démos
 
@@ -122,20 +122,20 @@ Consultez toutes les applications d'example dans le répertoire
 
 - Application de messagerie de groupe développée avec React, incluant un indicateur de frappe, les utilisateurs connectés & les
   notifications de nouveaux messages.
-  - [Essayez la](https://realtime-chat.demo.hasura.app/)
+  - [Essayez la](https://realtime-chat.demo.hasura.io/)
   - [Tutoriel](../community/sample-apps/realtime-chat)
-  - [Explorez les APIs](https://realtime-chat.demo.hasura.app/console)
+  - [Explorez les APIs](https://realtime-chat.demo.hasura.io/console)
 
 - Application de localisation en temps-réel montrant un véhicule dont les coordonnées GPS évoluent
   se déplacer sur une carte.
-  - [Essayez la](https://realtime-location-tracking.demo.hasura.app/)
+  - [Essayez la](https://realtime-location-tracking.demo.hasura.io/)
   - [Tutoriel](../community/sample-apps/realtime-location-tracking)
-  - [Explorez les APIs](https://realtime-location-tracking.demo.hasura.app/console)
+  - [Explorez les APIs](https://realtime-location-tracking.demo.hasura.io/console)
 
 - Un tableau de bord temps-réel pour l'aggrégation de données en constante évolution.
-  - [Essayez la](https://realtime-poll.demo.hasura.app/)
+  - [Essayez la](https://realtime-poll.demo.hasura.io/)
   - [Tutoriel](../community/sample-apps/realtime-poll)
-  - [Explorez les APIs](https://realtime-poll.demo.hasura.app/console)
+  - [Explorez les APIs](https://realtime-poll.demo.hasura.io/console)
 
 ### Vidéos
 
@@ -201,6 +201,6 @@ contenu des répertoires [`docs`](../docs) et [`community`](../community).
 Ceci readme est disponible dans les traductions suivantes:
 
 - [Japanese :jp:](translations/README.japanese.md) (:pray: [@moksahero](https://github.com/moksahero))
-- [English](https://github.com/hasura/graphql-engine/blob/master/README.md)
+- [English](https://github.com/hasura/graphql-engine/blob/stable/README.md)
 
 Les traductions d'autres fichiers sont disponibles [ici](translations).

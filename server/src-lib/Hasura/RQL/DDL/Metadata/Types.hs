@@ -1,421 +1,315 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 -- | Types related to metadata management API
-
-{-# LANGUAGE TypeApplications #-}
 module Hasura.RQL.DDL.Metadata.Types
-  ( currentMetadataVersion
-  , MetadataVersion(..)
-  , TableMeta(..)
-  , tmTable
-  , tmIsEnum
-  , tmConfiguration
-  , tmObjectRelationships
-  , tmArrayRelationships
-  , tmComputedFields
-  , tmInsertPermissions
-  , tmSelectPermissions
-  , tmUpdatePermissions
-  , tmDeletePermissions
-  , tmEventTriggers
-  , mkTableMeta
-  , ReplaceMetadata(..)
-  , replaceMetadataToOrdJSON
-  , ComputedFieldMeta(..)
-  , FunctionsMetadata(..)
-  , ExportMetadata(..)
-  , ClearMetadata(..)
-  , ReloadMetadata(..)
-  , DumpInternalState(..)
-  , GetInconsistentMetadata(..)
-  , DropInconsistentMetadata(..)
-  ) where
+  ( -- * Export Metadata
+    ExportMetadata (..),
 
-import           Hasura.Prelude
+    -- * Replace Metadata
+    ReplaceMetadata (..),
+    ReplaceMetadataV1 (..),
+    ReplaceMetadataV2 (..),
+    AllowInconsistentMetadata (..),
 
-import           Control.Lens                   hiding (set, (.=))
-import           Data.Aeson
-import           Data.Aeson.Casing
-import           Data.Aeson.TH
-import           Language.Haskell.TH.Syntax     (Lift)
+    -- * Reload Metadata
+    ReloadMetadata (..),
+    ReloadSpec (..),
 
-import qualified Data.Aeson.Ordered             as AO
-import qualified Data.HashMap.Strict            as HM
-import qualified Data.HashSet                   as HS
+    -- * Clear Metadata
+    ClearMetadata (..),
 
-import           Hasura.RQL.Types
-import           Hasura.SQL.Types
+    -- * Get Inconsistent Metadata
+    GetInconsistentMetadata (..),
 
-import qualified Hasura.RQL.DDL.ComputedField   as ComputedField
-import qualified Hasura.RQL.DDL.Permission      as Permission
-import qualified Hasura.RQL.DDL.QueryCollection as Collection
-import qualified Hasura.RQL.DDL.Relationship    as Relationship
-import qualified Hasura.RQL.DDL.Schema          as Schema
+    -- * Drop Inconsistent Metadata
+    DropInconsistentMetadata (..),
 
-data MetadataVersion
-  = MVVersion1
-  | MVVersion2
-  deriving (Show, Eq, Lift, Generic)
+    -- * Test Webhook Transform
+    TestWebhookTransform (..),
+    twtRequestTransformer,
+    twtResponseTransformer,
+    WebHookUrl (..),
 
-instance ToJSON MetadataVersion where
-  toJSON MVVersion1 = toJSON @Int 1
-  toJSON MVVersion2 = toJSON @Int 2
+    -- * Dump Internal State
+    DumpInternalState (..),
+  )
+where
 
-instance FromJSON MetadataVersion where
-  parseJSON v = do
-    version :: Int <- parseJSON v
-    case version of
-      1 -> pure MVVersion1
-      2 -> pure MVVersion2
-      i -> fail $ "expected 1 or 2, encountered " ++ show i
+--------------------------------------------------------------------------------
 
-currentMetadataVersion :: MetadataVersion
-currentMetadataVersion = MVVersion2
+import Control.Lens (Lens')
+import Control.Lens qualified as Lens
+import Data.Aeson (FromJSON, ToJSON, (.!=), (.:), (.:?), (.=))
+import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.TH qualified as Aeson.TH
+import Data.CaseInsensitive qualified as CI
+import Data.Environment qualified as Env
+import Hasura.Backends.DataConnector.Adapter.Types (DataConnectorName)
+import Hasura.Prelude
+import Hasura.RQL.DDL.Webhook.Transform (MetadataResponseTransform, RequestTransform)
+import Hasura.RQL.Types.Common qualified as Common
+import Hasura.RQL.Types.Metadata (Metadata, MetadataNoSources)
+import Hasura.RQL.Types.Metadata qualified as Metadata
+import Hasura.RemoteSchema.Metadata (RemoteSchemaName)
+import Hasura.Session (SessionVariables)
+import Network.HTTP.Client.Transformable qualified as HTTP
 
-data ComputedFieldMeta
-  = ComputedFieldMeta
-  { _cfmName       :: !ComputedFieldName
-  , _cfmDefinition :: !ComputedField.ComputedFieldDefinition
-  , _cfmComment    :: !(Maybe Text)
-  } deriving (Show, Eq, Lift, Generic)
-$(deriveJSON (aesonDrop 4 snakeCase) ''ComputedFieldMeta)
+--------------------------------------------------------------------------------
 
-data TableMeta
-  = TableMeta
-  { _tmTable               :: !QualifiedTable
-  , _tmIsEnum              :: !Bool
-  , _tmConfiguration       :: !TableConfig
-  , _tmObjectRelationships :: ![Relationship.ObjRelDef]
-  , _tmArrayRelationships  :: ![Relationship.ArrRelDef]
-  , _tmComputedFields      :: ![ComputedFieldMeta]
-  , _tmInsertPermissions   :: ![Permission.InsPermDef]
-  , _tmSelectPermissions   :: ![Permission.SelPermDef]
-  , _tmUpdatePermissions   :: ![Permission.UpdPermDef]
-  , _tmDeletePermissions   :: ![Permission.DelPermDef]
-  , _tmEventTriggers       :: ![EventTriggerConf]
-  } deriving (Show, Eq, Lift, Generic)
-$(makeLenses ''TableMeta)
-
-mkTableMeta :: QualifiedTable -> Bool -> TableConfig -> TableMeta
-mkTableMeta qt isEnum config =
-  TableMeta qt isEnum config [] [] [] [] [] [] [] []
-
-instance FromJSON TableMeta where
-  parseJSON (Object o) = do
-    unless (null unexpectedKeys) $
-      fail $ "unexpected keys when parsing TableMetadata : "
-      <> show (HS.toList unexpectedKeys)
-
-    TableMeta
-     <$> o .: tableKey
-     <*> o .:? isEnumKey .!= False
-     <*> o .:? configKey .!= emptyTableConfig
-     <*> o .:? orKey .!= []
-     <*> o .:? arKey .!= []
-     <*> o .:? cfKey .!= []
-     <*> o .:? ipKey .!= []
-     <*> o .:? spKey .!= []
-     <*> o .:? upKey .!= []
-     <*> o .:? dpKey .!= []
-     <*> o .:? etKey .!= []
-
-    where
-      tableKey = "table"
-      isEnumKey = "is_enum"
-      configKey = "configuration"
-      orKey = "object_relationships"
-      arKey = "array_relationships"
-      ipKey = "insert_permissions"
-      spKey = "select_permissions"
-      upKey = "update_permissions"
-      dpKey = "delete_permissions"
-      etKey = "event_triggers"
-      cfKey = "computed_fields"
-
-      unexpectedKeys =
-        HS.fromList (HM.keys o) `HS.difference` expectedKeySet
-
-      expectedKeySet =
-        HS.fromList [ tableKey, isEnumKey, configKey, orKey
-                    , arKey , ipKey, spKey, upKey, dpKey, etKey
-                    , cfKey
-                    ]
-
-  parseJSON _ =
-    fail "expecting an Object for TableMetadata"
-
-data FunctionsMetadata
-  = FMVersion1 ![QualifiedFunction]
-  | FMVersion2 ![Schema.TrackFunctionV2]
-  deriving (Show, Eq, Lift, Generic)
-
-instance ToJSON FunctionsMetadata where
-  toJSON (FMVersion1 qualifiedFunctions) = toJSON qualifiedFunctions
-  toJSON (FMVersion2 functionsV2)        = toJSON functionsV2
-
+-- | 'ClearMetadata' can be used to reset the state of Hasura -- clean
+-- the current state by forgetting the tables tracked, relationships,
+-- permissions, event triggers etc.
+--
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#metadata-clear-metadata
 data ClearMetadata
   = ClearMetadata
-  deriving (Show, Eq, Lift)
-$(deriveToJSON defaultOptions ''ClearMetadata)
+  deriving (Show, Eq)
+
+$(Aeson.TH.deriveToJSON Aeson.TH.defaultOptions ''ClearMetadata)
 
 instance FromJSON ClearMetadata where
   parseJSON _ = return ClearMetadata
 
-data ReplaceMetadata
-  = ReplaceMetadata
-  { aqVersion          :: !MetadataVersion
-  , aqTables           :: ![TableMeta]
-  , aqFunctions        :: !FunctionsMetadata
-  , aqRemoteSchemas    :: ![AddRemoteSchemaQuery]
-  , aqQueryCollections :: ![Collection.CreateCollection]
-  , aqAllowlist        :: ![Collection.CollectionReq]
-  } deriving (Show, Eq, Lift)
+-- | 'ExportMetadata' is used to export the current metadata from the
+-- server as a JSON file.
+--
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#metadata-export-metadata
+data ExportMetadata = ExportMetadata deriving (Show, Eq)
 
-instance FromJSON ReplaceMetadata where
-  parseJSON = withObject "Object" $ \o -> do
-    version <- o .:? "version" .!= MVVersion1
-    ReplaceMetadata version
-      <$> o .: "tables"
-      <*> (o .:? "functions" >>= parseFunctions version)
-      <*> o .:? "remote_schemas" .!= []
-      <*> o .:? "query_collections" .!= []
-      <*> o .:? "allow_list" .!= []
-    where
-      parseFunctions version maybeValue =
-        case version of
-          MVVersion1 -> FMVersion1 <$> maybe (pure []) parseJSON maybeValue
-          MVVersion2 -> FMVersion2 <$> maybe (pure []) parseJSON maybeValue
-
-data ExportMetadata
-  = ExportMetadata
-  deriving (Show, Eq, Lift)
-$(deriveToJSON defaultOptions ''ExportMetadata)
+instance ToJSON ExportMetadata where
+  toJSON ExportMetadata = Aeson.object []
 
 instance FromJSON ExportMetadata where
-  parseJSON _ = return ExportMetadata
+  parseJSON _ = pure ExportMetadata
 
-data ReloadMetadata
-  = ReloadMetadata
-  deriving (Show, Eq, Lift)
-$(deriveToJSON defaultOptions ''ReloadMetadata)
+data ReloadSpec a
+  = RSReloadAll
+  | RSReloadList (HashSet a)
+  deriving (Show, Eq)
+
+instance (ToJSON a) => ToJSON (ReloadSpec a) where
+  toJSON = \case
+    RSReloadAll -> Aeson.Bool True
+    RSReloadList l -> Aeson.toJSON l
+
+instance (FromJSON a, Hashable a) => FromJSON (ReloadSpec a) where
+  parseJSON (Aeson.Bool b) = pure $ if b then RSReloadAll else RSReloadList mempty
+  parseJSON v = RSReloadList <$> Aeson.parseJSON v
+
+type ReloadRemoteSchemas = ReloadSpec RemoteSchemaName
+
+type ReloadSources = ReloadSpec Common.SourceName
+
+type ReloadDataConnectors = ReloadSpec DataConnectorName
+
+reloadAllRemoteSchemas :: ReloadRemoteSchemas
+reloadAllRemoteSchemas = RSReloadAll
+
+reloadAllSources :: ReloadSources
+reloadAllSources = RSReloadAll
+
+reloadAllDataConnectors :: ReloadDataConnectors
+reloadAllDataConnectors = RSReloadAll
+
+-- | 'ReloadMetadata' should be used when there is a change in
+-- underlying Postgres database that Hasura should be aware
+-- of. Example: a new column is added to a table using psql and this
+-- column should now be added to the GraphQL schema.
+--
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#metadata-reload-metadata
+data ReloadMetadata = ReloadMetadata
+  { _rmReloadRemoteSchemas :: ReloadRemoteSchemas,
+    _rmReloadSources :: ReloadSources,
+    -- | Provides a way for the user to allow to explicitly recreate event triggers
+    --   for some or all the sources. This is useful when a user may have fiddled with
+    --   the SQL trigger in the source and they'd simply want the event trigger to be
+    --   recreated without deleting and creating the event trigger. By default, no
+    --   source's event triggers will be recreated.
+    _rmRecreateEventTriggers :: ReloadSources,
+    _rmReloadDataConnectors :: ReloadDataConnectors
+  }
+  deriving (Show, Eq)
+
+$(Aeson.TH.deriveToJSON hasuraJSON ''ReloadMetadata)
 
 instance FromJSON ReloadMetadata where
-  parseJSON _ = return ReloadMetadata
+  parseJSON = Aeson.withObject "ReloadMetadata" $ \o ->
+    ReloadMetadata
+      <$> o .:? "reload_remote_schemas" .!= reloadAllRemoteSchemas
+      <*> o .:? "reload_sources" .!= reloadAllSources
+      <*> o .:? "recreate_event_triggers" .!= RSReloadList mempty
+      <*> o .:? "reload_data_connectors" .!= reloadAllDataConnectors
 
+-- | Undocumented Metadata API action which serializes the entire
+-- 'SchemaCache'.
 data DumpInternalState
   = DumpInternalState
-  deriving (Show, Eq, Lift)
-$(deriveToJSON defaultOptions ''DumpInternalState)
+  deriving (Show, Eq)
+
+$(Aeson.TH.deriveToJSON Aeson.TH.defaultOptions ''DumpInternalState)
 
 instance FromJSON DumpInternalState where
   parseJSON _ = return DumpInternalState
 
+-- | 'GetInconsistentMetadata' can be used to fetch all inconsistent metadata objects.
+--
+-- https://hasura.io/docs/latest/api-reference/schema-metadata-api/manage-metadata/#schema-metadata-get-inconsistent-metadata
 data GetInconsistentMetadata
   = GetInconsistentMetadata
-  deriving (Show, Eq, Lift)
-$(deriveToJSON defaultOptions ''GetInconsistentMetadata)
+  deriving (Show, Eq)
+
+$(Aeson.TH.deriveToJSON Aeson.TH.defaultOptions ''GetInconsistentMetadata)
 
 instance FromJSON GetInconsistentMetadata where
   parseJSON _ = return GetInconsistentMetadata
 
+-- | 'DropInconsistentMetadata' can be used to purge all inconsistent
+-- objects from the metadata.
+--
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#metadata-drop-inconsistent-metadata
 data DropInconsistentMetadata
- = DropInconsistentMetadata
- deriving(Show, Eq, Lift)
-$(deriveToJSON defaultOptions ''DropInconsistentMetadata)
+  = DropInconsistentMetadata
+  deriving (Show, Eq)
+
+$(Aeson.TH.deriveToJSON Aeson.TH.defaultOptions ''DropInconsistentMetadata)
 
 instance FromJSON DropInconsistentMetadata where
   parseJSON _ = return DropInconsistentMetadata
 
-instance ToJSON ReplaceMetadata where
-  toJSON = AO.fromOrdered . replaceMetadataToOrdJSON
+data AllowInconsistentMetadata
+  = AllowInconsistentMetadata
+  | NoAllowInconsistentMetadata
+  deriving (Show, Eq)
 
--- | Encode 'ReplaceMetadata' to JSON with deterministic ordering. Ordering of object keys and array
--- elements should  remain consistent across versions of graphql-engine if possible!
+instance FromJSON AllowInconsistentMetadata where
+  parseJSON =
+    Aeson.withBool "AllowInconsistentMetadata" $
+      pure . bool NoAllowInconsistentMetadata AllowInconsistentMetadata
+
+instance ToJSON AllowInconsistentMetadata where
+  toJSON = Aeson.toJSON . toBool
+    where
+      toBool AllowInconsistentMetadata = True
+      toBool NoAllowInconsistentMetadata = False
+
+-- | Replace metadata either with or without metadata sources.
+data ReplaceMetadataV1
+  = RMWithSources Metadata
+  | RMWithoutSources MetadataNoSources
+  deriving (Eq)
+
+instance FromJSON ReplaceMetadataV1 where
+  parseJSON = Aeson.withObject "ReplaceMetadataV1" $ \o -> do
+    version <- o .:? "version" .!= Metadata.MVVersion1
+    case version of
+      Metadata.MVVersion3 -> RMWithSources <$> Aeson.parseJSON (Aeson.Object o)
+      _ -> RMWithoutSources <$> Aeson.parseJSON (Aeson.Object o)
+
+instance ToJSON ReplaceMetadataV1 where
+  toJSON = \case
+    RMWithSources v -> Aeson.toJSON v
+    RMWithoutSources v -> Aeson.toJSON v
+
+-- | Replace metadata while allowing for inconsitency in the metadata object.
 --
--- Note: While modifying any part of the code below, make sure the encoded JSON of each type is
--- parsable via its 'FromJSON' instance.
-replaceMetadataToOrdJSON :: ReplaceMetadata -> AO.Value
-replaceMetadataToOrdJSON ( ReplaceMetadata
-                               version
-                               tables
-                               functions
-                               remoteSchemas
-                               queryCollections
-                               allowlist
-                             ) = AO.object $ [versionPair, tablesPair] <>
-                                 catMaybes [ functionsPair
-                                           , remoteSchemasPair
-                                           , queryCollectionsPair
-                                           , allowlistPair
-                                           ]
-  where
-    versionPair = ("version", AO.toOrdered version)
-    tablesPair = ("tables", AO.array $ map tableMetaToOrdJSON tables)
-    functionsPair = ("functions",) <$> functionsMetadataToOrdJSON functions
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#metadata-replace-metadata-syntax
+data ReplaceMetadataV2 = ReplaceMetadataV2
+  { _rmv2AllowInconsistentMetadata :: AllowInconsistentMetadata,
+    _rmv2Metadata :: ReplaceMetadataV1
+  }
+  deriving (Eq)
 
-    remoteSchemasPair = listToMaybeOrdPair "remote_schemas" remoteSchemaQToOrdJSON remoteSchemas
+instance FromJSON ReplaceMetadataV2 where
+  parseJSON = Aeson.withObject "ReplaceMetadataV2" $ \o ->
+    ReplaceMetadataV2
+      <$> o .:? "allow_inconsistent_metadata" .!= NoAllowInconsistentMetadata
+      <*> o .: "metadata"
 
-    queryCollectionsPair = listToMaybeOrdPair "query_collections" createCollectionToOrdJSON queryCollections
+instance ToJSON ReplaceMetadataV2 where
+  toJSON ReplaceMetadataV2 {..} =
+    Aeson.object
+      [ "allow_inconsistent_metadata" .= _rmv2AllowInconsistentMetadata,
+        "metadata" .= _rmv2Metadata
+      ]
 
-    allowlistPair = listToMaybeOrdPair "allowlist" AO.toOrdered allowlist
+-- | 'ReplaceMetadata' is used to replace/import metadata into
+-- Hasura. Existing metadata will be replaced with the new one.
+--
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#metadata-replace-metadata
+-- TODO: If additional API versions are supported in future it would
+-- be ideal to include a version field Rather than differentiating on
+-- the "metadata" field.
+data ReplaceMetadata
+  = RMReplaceMetadataV1 ReplaceMetadataV1
+  | RMReplaceMetadataV2 ReplaceMetadataV2
+  deriving (Eq)
 
-    tableMetaToOrdJSON :: TableMeta -> AO.Value
-    tableMetaToOrdJSON ( TableMeta
-                         table
-                         isEnum
-                         config
-                         objectRelationships
-                         arrayRelationships
-                         computedFields
-                         insertPermissions
-                         selectPermissions
-                         updatePermissions
-                         deletePermissions
-                         eventTriggers
-                       ) = AO.object $ [("table", AO.toOrdered table)]
-                           <> catMaybes [ isEnumPair
-                                        , configPair
-                                        , objectRelationshipsPair
-                                        , arrayRelationshipsPair
-                                        , computedFieldsPair
-                                        , insertPermissionsPair
-                                        , selectPermissionsPair
-                                        , updatePermissionsPair
-                                        , deletePermissionsPair
-                                        , eventTriggersPair
-                                        ]
-      where
-        isEnumPair = if isEnum then Just ("is_enum", AO.toOrdered isEnum) else Nothing
-        configPair = if config == emptyTableConfig then Nothing
-                     else Just ("configuration" , AO.toOrdered config)
-        objectRelationshipsPair = listToMaybeOrdPair "object_relationships"
-                                  relDefToOrdJSON objectRelationships
-        arrayRelationshipsPair = listToMaybeOrdPair "array_relationships"
-                                 relDefToOrdJSON arrayRelationships
-        computedFieldsPair = listToMaybeOrdPair "computed_fields"
-                             computedFieldMetaToOrdJSON computedFields
-        insertPermissionsPair = listToMaybeOrdPair "insert_permissions"
-                                insPermDefToOrdJSON insertPermissions
-        selectPermissionsPair = listToMaybeOrdPair "select_permissions"
-                                selPermDefToOrdJSON selectPermissions
-        updatePermissionsPair = listToMaybeOrdPair "update_permissions"
-                                updPermDefToOrdJSON updatePermissions
-        deletePermissionsPair = listToMaybeOrdPair "delete_permissions"
-                                delPermDefToOrdJSON deletePermissions
-        eventTriggersPair = listToMaybeOrdPair "event_triggers"
-                            eventTriggerConfToOrdJSON eventTriggers
+instance FromJSON ReplaceMetadata where
+  parseJSON = Aeson.withObject "ReplaceMetadata" $ \o -> do
+    if KeyMap.member "metadata" o
+      then RMReplaceMetadataV2 <$> Aeson.parseJSON (Aeson.Object o)
+      else RMReplaceMetadataV1 <$> Aeson.parseJSON (Aeson.Object o)
 
-        relDefToOrdJSON :: (ToJSON a) => Relationship.RelDef a -> AO.Value
-        relDefToOrdJSON (Relationship.RelDef name using comment) =
-          AO.object $ [ ("name", AO.toOrdered name)
-                      , ("using", AO.toOrdered using)
-                      ] <> catMaybes [maybeCommentToMaybeOrdPair comment]
+instance ToJSON ReplaceMetadata where
+  toJSON = \case
+    RMReplaceMetadataV1 v1 -> Aeson.toJSON v1
+    RMReplaceMetadataV2 v2 -> Aeson.toJSON v2
 
-        computedFieldMetaToOrdJSON :: ComputedFieldMeta -> AO.Value
-        computedFieldMetaToOrdJSON (ComputedFieldMeta name definition comment) =
-          AO.object $ [ ("name", AO.toOrdered name)
-                      , ("definition", AO.toOrdered definition)
-                      ] <> catMaybes [maybeCommentToMaybeOrdPair comment]
+data WebHookUrl = EnvVar String | URL Text
+  deriving (Eq)
 
-        insPermDefToOrdJSON :: Permission.InsPermDef -> AO.Value
-        insPermDefToOrdJSON = permDefToOrdJSON insPermToOrdJSON
-          where
-            insPermToOrdJSON (Permission.InsPerm check set columns) =
-              let columnsPair = ("columns",) . AO.toOrdered <$> columns
-              in AO.object $ [("check", AO.toOrdered check)]
-                 <> catMaybes [maybeSetToMaybeOrdPair set, columnsPair]
+instance FromJSON WebHookUrl where
+  parseJSON (Aeson.Object o) = do
+    var <- o .: "from_env"
+    pure $ EnvVar var
+  parseJSON (Aeson.String str) = pure $ URL str
+  parseJSON _ = empty
 
-        selPermDefToOrdJSON :: Permission.SelPermDef -> AO.Value
-        selPermDefToOrdJSON = permDefToOrdJSON selPermToOrdJSON
-          where
-            selPermToOrdJSON (Permission.SelPerm columns fltr limit allowAgg computedFieldsPerm) =
-              AO.object $ catMaybes [ columnsPair
-                                    , computedFieldsPermPair
-                                    , filterPair
-                                    , limitPair
-                                    , allowAggPair
-                                    ]
-              where
-                columnsPair = Just ("columns", AO.toOrdered columns)
-                computedFieldsPermPair = listToMaybeOrdPair "computed_fields" AO.toOrdered computedFieldsPerm
-                filterPair = Just ("filter", AO.toOrdered fltr)
-                limitPair = maybeAnyToMaybeOrdPair "limit" AO.toOrdered limit
-                allowAggPair = if allowAgg
-                               then Just ("allow_aggregations", AO.toOrdered allowAgg)
-                               else Nothing
+instance ToJSON WebHookUrl where
+  toJSON (EnvVar var) = Aeson.object ["from_env" .= var]
+  toJSON (URL url) = Aeson.toJSON url
 
-        updPermDefToOrdJSON :: Permission.UpdPermDef -> AO.Value
-        updPermDefToOrdJSON = permDefToOrdJSON updPermToOrdJSON
-          where
-            updPermToOrdJSON (Permission.UpdPerm columns set fltr) =
-              AO.object $ [ ("columns", AO.toOrdered columns)
-                          , ("filter", AO.toOrdered fltr)
-                          ] <> catMaybes [maybeSetToMaybeOrdPair set]
+-- | 'TestWebhookTransform' can be used to test out request
+-- transformations using mock data.
+--
+-- https://hasura.io/docs/latest/api-reference/metadata-api/manage-metadata/#test-webhook-transform
+data TestWebhookTransform = TestWebhookTransform
+  { _twtEnv :: Env.Environment,
+    _twtHeaders :: [HTTP.Header],
+    _twtWebhookUrl :: WebHookUrl,
+    _twtPayload :: Aeson.Value,
+    _twtTransformer :: RequestTransform,
+    _twtResponseTransformer :: Maybe MetadataResponseTransform,
+    _twtSessionVariables :: Maybe SessionVariables
+  }
+  deriving (Eq)
 
-        delPermDefToOrdJSON :: Permission.DelPermDef -> AO.Value
-        delPermDefToOrdJSON = permDefToOrdJSON AO.toOrdered
+twtRequestTransformer :: Lens' TestWebhookTransform RequestTransform
+twtRequestTransformer = Lens.lens _twtTransformer \twt a -> twt {_twtTransformer = a}
 
-        permDefToOrdJSON :: (a -> AO.Value) -> Permission.PermDef a -> AO.Value
-        permDefToOrdJSON permToOrdJSON (Permission.PermDef role permission comment) =
-          AO.object $ [ ("role", AO.toOrdered role)
-                      , ("permission", permToOrdJSON permission)
-                      ] <> catMaybes [maybeCommentToMaybeOrdPair comment]
+twtResponseTransformer :: Lens' TestWebhookTransform (Maybe MetadataResponseTransform)
+twtResponseTransformer = Lens.lens _twtResponseTransformer \twt a -> twt {_twtResponseTransformer = a}
 
-        eventTriggerConfToOrdJSON :: EventTriggerConf -> AO.Value
-        eventTriggerConfToOrdJSON (EventTriggerConf name definition webhook webhookFromEnv retryConf headers) =
-          AO.object $ [ ("name", AO.toOrdered name)
-                      , ("definition", AO.toOrdered definition)
-                      , ("retry_conf", AO.toOrdered retryConf)
-                      ] <> catMaybes [ maybeAnyToMaybeOrdPair "webhook" AO.toOrdered webhook
-                                     , maybeAnyToMaybeOrdPair "webhook_from_env" AO.toOrdered webhookFromEnv
-                                     , headers >>= listToMaybeOrdPair "headers" AO.toOrdered
-                                     ]
+instance FromJSON TestWebhookTransform where
+  parseJSON = Aeson.withObject "TestWebhookTransform" $ \o -> do
+    env <- fmap (fromMaybe mempty) $ o .:? "env"
+    headers <- fmap (fmap (first (CI.mk))) $ o .:? "request_headers" .!= []
+    url <- o .: "webhook_url"
+    payload <- o .: "body"
+    reqTransform <- o .: "request_transform"
+    respTransform <- o .:? "response_transform"
+    sessionVars <- o .:? "session_variables"
+    pure $ TestWebhookTransform env headers url payload reqTransform respTransform sessionVars
 
-    functionsMetadataToOrdJSON :: FunctionsMetadata -> Maybe AO.Value
-    functionsMetadataToOrdJSON fm =
-      let withList _ []   = Nothing
-          withList f list = Just $ f list
-          functionV2ToOrdJSON (Schema.TrackFunctionV2 function config) =
-            AO.object $ [("function", AO.toOrdered function)]
-                        <> if config == Schema.emptyFunctionConfig then []
-                           else pure ("configuration", AO.toOrdered config)
-      in case fm of
-        FMVersion1 functionsV1 -> withList AO.toOrdered functionsV1
-        FMVersion2 functionsV2 -> withList (AO.array . map functionV2ToOrdJSON) functionsV2
-
-    remoteSchemaQToOrdJSON :: AddRemoteSchemaQuery -> AO.Value
-    remoteSchemaQToOrdJSON (AddRemoteSchemaQuery name definition comment) =
-      AO.object $ [ ("name", AO.toOrdered name)
-                  , ("definition", remoteSchemaDefToOrdJSON definition)
-                  ] <> catMaybes [maybeCommentToMaybeOrdPair comment]
-      where
-        remoteSchemaDefToOrdJSON :: RemoteSchemaDef -> AO.Value
-        remoteSchemaDefToOrdJSON (RemoteSchemaDef url urlFromEnv headers frwrdClientHdrs timeout) =
-          AO.object $ catMaybes [ maybeToPair "url" url
-                                , maybeToPair "url_from_env" urlFromEnv
-                                , maybeToPair "timeout_seconds" timeout
-                                , headers >>= listToMaybeOrdPair "headers" AO.toOrdered
-                                ] <> [("forward_client_headers", AO.toOrdered frwrdClientHdrs) | frwrdClientHdrs]
-          where
-            maybeToPair n = maybeAnyToMaybeOrdPair n AO.toOrdered
-
-    createCollectionToOrdJSON :: Collection.CreateCollection -> AO.Value
-    createCollectionToOrdJSON (Collection.CreateCollection name definition comment) =
-      AO.object $ [ ("name", AO.toOrdered name)
-                  , ("definition", AO.toOrdered definition)
-                  ] <> catMaybes [maybeCommentToMaybeOrdPair comment]
-
-
-    -- Utility functions
-    listToMaybeOrdPair :: Text -> (a -> AO.Value) -> [a] -> Maybe (Text, AO.Value)
-    listToMaybeOrdPair name f = \case
-      []   -> Nothing
-      list -> Just $ (name,) $ AO.array $ map f list
-
-    maybeSetToMaybeOrdPair :: Maybe (ColumnValues Value) -> Maybe (Text, AO.Value)
-    maybeSetToMaybeOrdPair set = set >>= \colVals -> if colVals == HM.empty then Nothing
-                                      else Just ("set", AO.toOrdered colVals)
-
-    maybeCommentToMaybeOrdPair :: Maybe Text -> Maybe (Text, AO.Value)
-    maybeCommentToMaybeOrdPair = maybeAnyToMaybeOrdPair "comment" AO.toOrdered
-
-    maybeAnyToMaybeOrdPair :: Text -> (a -> AO.Value) -> Maybe a -> Maybe (Text, AO.Value)
-    maybeAnyToMaybeOrdPair name f = fmap ((name,) . f)
+instance ToJSON TestWebhookTransform where
+  toJSON (TestWebhookTransform env headers url payload mt mrt sv) =
+    Aeson.object
+      [ "env" .= env,
+        "request_headers" .= fmap (first CI.original) headers,
+        "webhook_url" .= url,
+        "body" .= payload,
+        "request_transform" .= mt,
+        "response_transform" .= mrt,
+        "session_variables" .= sv
+      ]

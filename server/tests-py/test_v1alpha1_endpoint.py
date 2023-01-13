@@ -1,13 +1,12 @@
-import ruamel.yaml as yaml
 import pytest
-#from validate import check_query, test_forbidden_when_admin_secret_reqd, test_forbidden_webhook
 from validate import check_query
 import validate
-from super_classes import DefaultTestSelectQueries
 from context import GQLWsClient
 
+usefixtures = pytest.mark.usefixtures
 
-class TestV1Alpha1GraphQLErrors(DefaultTestSelectQueries):
+@usefixtures('per_class_tests_db_state')
+class TestV1Alpha1GraphQLErrors:
 
     @classmethod
     def dir(cls):
@@ -28,14 +27,12 @@ class TestV1Alpha1GraphQLErrors(DefaultTestSelectQueries):
             'query': {'query': gql_query},
         }
 
-        if hge_ctx.hge_key is not None and hge_ctx.hge_webhook is None and hge_ctx.hge_jwt_key is None:
+        if hge_ctx.hge_key is not None and not hge_ctx.webhook and hge_ctx.hge_jwt_key is None:
             # Test whether it is forbidden when incorrect/no admin_secret is specified
             validate.test_forbidden_when_admin_secret_reqd(hge_ctx, http_conf)
-
-        elif hge_ctx.hge_webhook is not None:
-            if not hge_ctx.webhook_insecure:
+        elif hge_ctx.webhook:
             # Check whether the output is also forbidden when webhook returns forbidden
-                validate.test_forbidden_webhook(hge_ctx, http_conf)
+            validate.test_forbidden_webhook(hge_ctx, http_conf)
         else:
             assert True
 
@@ -61,7 +58,7 @@ class TestV1Alpha1GraphQLErrors(DefaultTestSelectQueries):
                         "path": "$.selectionSet.author.selectionSet.notPresentCol",
                         "code": "validation-failed"
                     },
-                    "message": "field \"notPresentCol\" not found in type: 'author'"
+                    "message": "field 'notPresentCol' not found in type: 'author'"
                 }]
             }
         }
@@ -71,7 +68,7 @@ class TestV1Alpha1GraphQLErrors(DefaultTestSelectQueries):
             'response': {
                 "path": "$.selectionSet.author.selectionSet.notPresentCol",
                 "code": "validation-failed",
-                "error": "field \"notPresentCol\" not found in type: 'author'"
+                "error": "field 'notPresentCol' not found in type: 'author'"
             }
         }
 

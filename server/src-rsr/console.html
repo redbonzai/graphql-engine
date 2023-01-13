@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en-us">
   <head>
     <script>
@@ -12,9 +13,12 @@
        assetsVersion: "{{assetsVersion}}",
        cdnAssets: {{cdnAssets}},
        serverVersion: "{{serverVersion}}",
+       consoleType: "oss",
+       consoleSentryDsn: "{{consoleSentryDsn}}"
      };
      window.__env.versionedAssetsPath = window.__env.assetsPath;
     </script>
+    <meta name="robots" content="noindex" />
   </head>
   <body>
     <style>
@@ -100,3 +104,4 @@
     </script>
   </body>
 </html>
+

@@ -1,6 +1,6 @@
 # Contributing to Hasura graphql-engine
 
-_First_: if you feel insecure about how to start contributing, feel free to ask us on our [Discord channel](https://discordapp.com/invite/hasura), in the #contrib channel or as a DM to Marion (@marion#9554). You can also just go ahead with your contribution and we'll give you feedback. Don't worry - the worst that can happen is that you'll be politely asked to change something. We appreciate any contributions, and we don't want a wall of rules to stand in the way of that.
+_First_: if you feel insecure about how to start contributing, feel free to ask us on our [Discord channel](https://discordapp.com/invite/hasura) in the #contrib channel. You can also just go ahead with your contribution and we'll give you feedback. Don't worry - the worst that can happen is that you'll be politely asked to change something. We appreciate any contributions, and we don't want a wall of rules to stand in the way of that.
 
 However, for those individuals who want a bit more guidance on the best way to contribute to the project, read on. This document will cover what we're looking for. By addressing the points below, the chances that we
 can quickly merge or address your contributions will increase.
@@ -72,7 +72,7 @@ The contributing guide for docs can be found at [docs/CONTRIBUTING.md](docs/CONT
 
 ### Community content
 
-Since we launched our [learn page](https://learn.hasura.io/), we are happy about contributions:
+Since we launched our [learn page](https://hasura.io/learn/), we are happy about contributions:
 
 - Fix errors in existing learn tutorials
 
@@ -120,6 +120,8 @@ The README of the CLI repository can be found [here](https://github.com/hasura/g
 - Please include logs of the server, if relevant.
 
 ### Working on an issue
+
+- We use the [fork-and-branch git workflow](https://blog.scottlowe.org/2015/01/27/using-fork-branch-git-workflow/).
 
 - Please make sure there is an issue associated with the work that you're doing.
 

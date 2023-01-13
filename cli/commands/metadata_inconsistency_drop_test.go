@@ -1,45 +1,65 @@
 package commands
 
 import (
-	"net/url"
+	"fmt"
 	"os"
-	"testing"
-	"time"
+	"path/filepath"
 
-	"github.com/briandowns/spinner"
-	"github.com/sirupsen/logrus/hooks/test"
-
-	"github.com/hasura/graphql-engine/cli"
-	"github.com/hasura/graphql-engine/cli/version"
+	"github.com/Pallinder/go-randomdata"
+	"github.com/hasura/graphql-engine/cli/v2/internal/testutil"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gexec"
 )
 
-func testMetadataInconsistencyDropCmd(t *testing.T, migrationsDir string, metadataFile string, endpoint *url.URL) {
-	logger, _ := test.NewNullLogger()
-	opts := &metadataInconsistencyDropOptions{
-		EC: &cli.ExecutionContext{
-			Logger:       logger,
-			Spinner:      spinner.New(spinner.CharSets[7], 100*time.Millisecond),
-			MetadataFile: []string{metadataFile},
-			ServerConfig: &cli.ServerConfig{
-				Endpoint:       endpoint.String(),
-				AdminSecret:    os.Getenv("HASURA_GRAPHQL_TEST_ADMIN_SECRET"),
-				ParsedEndpoint: endpoint,
-			},
-			MigrationDir: migrationsDir,
-		},
-	}
+var _ = Describe("hasura metadata inconsistency drop", func() {
 
-	opts.EC.Version = version.New()
-	v, err := version.FetchServerVersion(opts.EC.ServerConfig.Endpoint)
-	if err != nil {
-		t.Fatalf("getting server version failed: %v", err)
-	}
-	opts.EC.Version.SetServerVersion(v)
+	var projectDirectory string
+	var sourceName string
+	var teardown func()
+	BeforeEach(func() {
+		projectDirectory = testutil.RandDirName()
+		hgeEndPort, teardownHGE := testutil.StartHasura(GinkgoT(), testutil.HasuraDockerImage)
+		hgeEndpoint := fmt.Sprintf("http://0.0.0.0:%s", hgeEndPort)
+		sourceName = randomdata.SillyName()
+		connectionString, teardownPG := testutil.AddDatabaseToHasura(GinkgoT(), hgeEndpoint, sourceName, "postgres")
+		copyTestConfigV3Project(projectDirectory)
+		editEndpointInConfig(filepath.Join(projectDirectory, defaultConfigFilename), hgeEndpoint)
+		editSourceNameInConfigV3ProjectTemplate(projectDirectory, sourceName, connectionString)
 
-	err = opts.run()
-	if err != nil {
-		t.Fatalf("failed dropping the inconsistency: %v", err)
-	}
+		teardown = func() {
+			os.RemoveAll(projectDirectory)
+			teardownHGE()
+			teardownPG()
+		}
+	})
 
-	os.RemoveAll(opts.EC.MigrationDir)
-}
+	AfterEach(func() { teardown() })
+
+	Context("metadata inconsistency drop test", func() {
+		It("Drops inconsistent objects from the metadata", func() {
+			testutil.RunCommandAndSucceed(testutil.CmdOpts{
+				Args:             []string{"metadata", "apply"},
+				WorkingDirectory: projectDirectory,
+			})
+			session := testutil.Hasura(testutil.CmdOpts{
+				Args:             []string{"metadata", "inconsistency", "status"},
+				WorkingDirectory: projectDirectory,
+			})
+			Eventually(session, timeout).Should(Exit(1))
+			Expect(session.Err.Contents()).Should(ContainSubstring("metadata is inconsistent, use 'hasura metadata ic list' command to see the inconsistent objects"))
+
+			testutil.RunCommandAndSucceed(testutil.CmdOpts{
+				Args:             []string{"metadata", "inconsistency", "drop"},
+				WorkingDirectory: projectDirectory,
+			})
+			session = testutil.Hasura(testutil.CmdOpts{
+				Args:             []string{"metadata", "inconsistency", "status"},
+				WorkingDirectory: projectDirectory,
+			})
+			want := `metadata is consistent`
+			Eventually(session, timeout).Should(Exit(0))
+			Expect(session.Err.Contents()).Should(ContainSubstring(want))
+		})
+	})
+})

@@ -1,125 +1,79 @@
 package commands
 
 import (
-	"bytes"
-	"io/ioutil"
-	"net/url"
+	"fmt"
 	"os"
 	"path/filepath"
-	"testing"
-	"time"
 
-	"github.com/briandowns/spinner"
-	"github.com/hasura/graphql-engine/cli"
-	"github.com/hasura/graphql-engine/cli/version"
-	"github.com/sirupsen/logrus/hooks/test"
+	"github.com/hasura/graphql-engine/cli/v2/internal/testutil"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gexec"
 )
 
-var testMetadata1 = `allowlist: []
-functions: []
-query_collections: []
-remote_schemas: []
-tables:
-- array_relationships: []
-  delete_permissions: []
-  event_triggers: []
-  insert_permissions: []
-  is_enum: false
-  object_relationships: []
-  select_permissions: []
-  table: test
-  update_permissions: []
+var _ = Describe("hasura metadata diff", func() {
+
+	var projectDirectory string
+	var teardown func()
+	BeforeEach(func() {
+		projectDirectory = testutil.RandDirName()
+		hgeEndPort, teardownHGE := testutil.StartHasura(GinkgoT(), testutil.HasuraDockerImage)
+		hgeEndpoint := fmt.Sprintf("http://0.0.0.0:%s", hgeEndPort)
+		testutil.RunCommandAndSucceed(testutil.CmdOpts{
+			Args: []string{"init", projectDirectory},
+		})
+		editEndpointInConfig(filepath.Join(projectDirectory, defaultConfigFilename), hgeEndpoint)
+
+		teardown = func() {
+			os.RemoveAll(projectDirectory)
+			teardownHGE()
+		}
+	})
+
+	AfterEach(func() {
+		teardown()
+	})
+
+	Context("metadata diff test", func() {
+		It("should output diff between metadata on server and local project", func() {
+			session := testutil.Hasura(testutil.CmdOpts{
+				Args:             []string{"metadata", "diff"},
+				WorkingDirectory: projectDirectory,
+			})
+			Eventually(session, timeout).Should(Exit(0))
+			stdout := session.Out.Contents()
+			Expect(stdout).Should(ContainSubstring("kind: postgres"))
+			Expect(stdout).Should(ContainSubstring("name: default"))
+
+			editMetadataFileInConfig(filepath.Join(projectDirectory, defaultConfigFilename), "metadata.yaml")
+			session = testutil.Hasura(testutil.CmdOpts{
+				Args:             []string{"metadata", "diff"},
+				WorkingDirectory: projectDirectory,
+			})
+			Eventually(session, timeout).Should(Exit(0))
+			stdout = session.Out.Contents()
+			Expect(stdout).Should(ContainSubstring("sources"))
+			Expect(stdout).Should(ContainSubstring("kind: postgres"))
+			Expect(stdout).Should(ContainSubstring("name: default"))
+			Expect(stdout).Should(ContainSubstring("tables: []"))
+
+			editMetadataFileInConfig(filepath.Join(projectDirectory, defaultConfigFilename), "metadata.json")
+			session = testutil.Hasura(testutil.CmdOpts{
+				Args:             []string{"metadata", "diff", "--no-color"},
+				WorkingDirectory: projectDirectory,
+			})
+			Eventually(session, timeout).Should(Exit(0))
+			stdout = session.Out.Contents()
+			want := `-  "version": 3,
+-  "sources": [
+-    {
+-      "name": "default",
+-      "kind": "postgres",
+-      "tables": [],
+-      "configuration": {
 `
 
-var testMetadata2 = `allowlist: []
-functions: []
-query_collections: []
-remote_schemas: []
-tables:
-- array_relationships: []
-  configuration:
-    custom_column_names: {}
-    custom_root_fields:
-      delete: null
-      insert: null
-      select: null
-      select_aggregate: null
-      select_by_pk: null
-      update: null
-  delete_permissions: []
-  event_triggers: []
-  insert_permissions: []
-  is_enum: false
-  object_relationships: []
-  select_permissions: []
-  table: test
-  update_permissions: []
-`
-
-func TestMetadataDiffCmd(t *testing.T) {
-	endpointURL, err := url.Parse(os.Getenv("HASURA_GRAPHQL_TEST_ENDPOINT"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create migration Dir
-	migrationsDir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(migrationsDir)
-
-	metadataFile := filepath.Join(migrationsDir, "metadata.yaml")
-	testMetadataFile1 := filepath.Join(migrationsDir, "testmetadata1.yaml")
-	testMetadataFile2 := filepath.Join(migrationsDir, "testmetadata2.yaml")
-
-	mustWriteFile(t, "", metadataFile, testMetadata1)
-	mustWriteFile(t, "", testMetadataFile1, testMetadata1)
-	mustWriteFile(t, "", testMetadataFile2, testMetadata2)
-
-	logger, _ := test.NewNullLogger()
-	outputFile := new(bytes.Buffer)
-	opts := &metadataDiffOptions{
-		EC: &cli.ExecutionContext{
-			Logger:       logger,
-			Spinner:      spinner.New(spinner.CharSets[7], 100*time.Millisecond),
-			MetadataFile: []string{metadataFile},
-			ServerConfig: &cli.ServerConfig{
-				Endpoint:       endpointURL.String(),
-				AdminSecret:    os.Getenv("HASURA_GRAPHQL_TEST_ADMIN_SECRET"),
-				ParsedEndpoint: endpointURL,
-			},
-		},
-		output: outputFile,
-	}
-
-	opts.EC.Version = version.New()
-	v, err := version.FetchServerVersion(opts.EC.ServerConfig.Endpoint)
-	if err != nil {
-		t.Fatalf("getting server version failed: %v", err)
-	}
-	opts.EC.Version.SetServerVersion(v)
-
-	// Run without args
-	opts.metadata[0] = metadataFile
-	err = opts.run()
-	if err != nil {
-		t.Fatalf("failed diffing metadata: %v", err)
-	}
-
-	// Run with one arg
-	opts.metadata = [2]string{testMetadataFile1, ""}
-
-	err = opts.run()
-	if err != nil {
-		t.Fatalf("failed diffing metadata: %v", err)
-	}
-
-	// Run with two args
-	opts.metadata = [2]string{testMetadataFile1, testMetadataFile2}
-
-	err = opts.run()
-	if err != nil {
-		t.Fatalf("failed diffing metadata: %v", err)
-	}
-}
+			Expect(stdout).Should(ContainSubstring(want))
+		})
+	})
+})
