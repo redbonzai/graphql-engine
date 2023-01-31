@@ -22,14 +22,17 @@ import Hasura.Base.Error
 import Hasura.EncJSON
 import Hasura.Logging qualified as L
 import Hasura.Metadata.Class
+import Hasura.NativeQuery.API qualified as NativeQuery
 import Hasura.Prelude hiding (first)
 import Hasura.RQL.DDL.Action
 import Hasura.RQL.DDL.ApiLimit
 import Hasura.RQL.DDL.ComputedField
+import Hasura.RQL.DDL.ConnectionTemplate
 import Hasura.RQL.DDL.CustomTypes
 import Hasura.RQL.DDL.DataConnector
 import Hasura.RQL.DDL.Endpoint
 import Hasura.RQL.DDL.EventTrigger
+import Hasura.RQL.DDL.FeatureFlag
 import Hasura.RQL.DDL.GraphqlSchemaIntrospection
 import Hasura.RQL.DDL.InheritedRoles
 import Hasura.RQL.DDL.Metadata
@@ -127,6 +130,12 @@ data RQLMetadataV1
   | -- Computed fields
     RMAddComputedField !(AnyBackend AddComputedField)
   | RMDropComputedField !(AnyBackend DropComputedField)
+  | -- Connection template
+    RMTestConnectionTemplate !(AnyBackend TestConnectionTemplate)
+  | -- Native access
+    RMGetNativeQuery !(AnyBackend NativeQuery.GetNativeQuery)
+  | RMTrackNativeQuery !(AnyBackend NativeQuery.BackendTrackNativeQuery)
+  | RMUntrackNativeQuery !(AnyBackend NativeQuery.UntrackNativeQuery)
   | -- Tables event triggers
     RMCreateEventTrigger !(AnyBackend (Unvalidated1 CreateEventTriggerQuery))
   | RMDeleteEventTrigger !(AnyBackend DeleteEventTriggerQuery)
@@ -210,6 +219,8 @@ data RQLMetadataV1
   | RMGetCatalogState !GetCatalogState
   | RMSetCatalogState !SetCatalogState
   | RMTestWebhookTransform !(Unvalidated TestWebhookTransform)
+  | -- Feature Flags
+    RMGetFeatureFlag !GetFeatureFlag
   | -- Bulk metadata queries
     RMBulk [RQLMetadataRequest]
   deriving (Generic)
@@ -289,6 +300,7 @@ instance FromJSON RQLMetadataV1 where
       "set_query_tags" -> RMSetQueryTagsConfig <$> args
       "set_opentelemetry_config" -> RMSetOpenTelemetryConfig <$> args
       "set_opentelemetry_status" -> RMSetOpenTelemetryStatus <$> args
+      "get_feature_flag" -> RMGetFeatureFlag <$> args
       "bulk" -> RMBulk <$> args
       -- Backend prefixed metadata actions:
       _ -> do
@@ -477,7 +489,11 @@ queryModifiesMetadata = \case
       RMListSourceKinds _ -> False
       RMGetSourceTables _ -> False
       RMGetTableInfo _ -> False
+      RMTestConnectionTemplate _ -> False
       RMSuggestRelationships _ -> False
+      RMGetNativeQuery _ -> False
+      RMTrackNativeQuery _ -> True
+      RMUntrackNativeQuery _ -> True
       RMBulk qs -> any queryModifiesMetadata qs
       -- We used to assume that the fallthrough was True,
       -- but it is better to be explicit here to warn when new constructors are added.
@@ -564,6 +580,7 @@ queryModifiesMetadata = \case
       RMSetQueryTagsConfig _ -> True
       RMSetOpenTelemetryConfig _ -> True
       RMSetOpenTelemetryStatus _ -> True
+      RMGetFeatureFlag _ -> False
   RMV2 q ->
     case q of
       RMV2ExportMetadata _ -> False
@@ -656,6 +673,10 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMDropFunctionPermission q -> dispatchMetadata runDropFunctionPermission q
   RMAddComputedField q -> dispatchMetadata runAddComputedField q
   RMDropComputedField q -> dispatchMetadata runDropComputedField q
+  RMTestConnectionTemplate q -> dispatchMetadata runTestConnectionTemplate q
+  RMGetNativeQuery q -> dispatchMetadata NativeQuery.runGetNativeQuery q
+  RMTrackNativeQuery q -> dispatchMetadata NativeQuery.runTrackNativeQuery q
+  RMUntrackNativeQuery q -> dispatchMetadata NativeQuery.runUntrackNativeQuery q
   RMCreateEventTrigger q ->
     dispatchMetadataAndEventTrigger
       ( validateTransforms
@@ -747,6 +768,7 @@ runMetadataQueryV1M env currentResourceVersion = \case
   RMSetQueryTagsConfig q -> runSetQueryTagsConfig q
   RMSetOpenTelemetryConfig q -> runSetOpenTelemetryConfig q
   RMSetOpenTelemetryStatus q -> runSetOpenTelemetryStatus q
+  RMGetFeatureFlag q -> runGetFeatureFlag q
   RMBulk q -> encJFromList <$> indexedMapM (runMetadataQueryM env currentResourceVersion) q
   where
     dispatchMetadata ::

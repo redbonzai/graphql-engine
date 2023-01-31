@@ -9,7 +9,7 @@ RFC](../../../rfcs/hspec-test-suite.md).
 
 Most of the required setup concerns (and is documented in the README for)
 [../test-harness/README.md](the test harness), so please follow that link for
-more information. 
+more information.
 
 The tests need to know the location of the `graphql-engine` executable:
 
@@ -26,11 +26,11 @@ $ export HASURA_BIGQUERY_PROJECT_ID=??? # The project ID
 $ export HASURA_BIGQUERY_SERVICE_KEY=??? # The service account key
 ```
 
-After that, BigQuery will be ready to test. 
+After that, BigQuery will be ready to test.
 
+For everything else, run the following in this directory:
 
-For everything else, run the following in the root of `graphql-engine`:
-```
+```bash
 $ docker-compose up
 ```
 
@@ -302,6 +302,14 @@ compose down --volumes` to delete the DBs and restart the containers.
 The DataConnector agent might be out of date. If you are getting a lot of test
 failures, first try rebuilding the containers with `docker compose build` to
 make sure you are using the latest version of the agent.
+
+### `make test-sqlserver` fails with `Inconsistent object: mssql connection error`
+
+Try updating the `mssql-tools` symlink:
+```sh
+brew install microsoft/mssql-release/mssql-tools@18
+brew unlink mssql-tools18 && brew link mssql-tools18
+```
 
 ### Microsoft SQL Server failures on Apple aarch64 chips
 

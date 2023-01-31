@@ -120,7 +120,7 @@ import Hasura.Server.API.Query (requiresAdmin)
 import Hasura.Server.App
 import Hasura.Server.Auth
 import Hasura.Server.CheckUpdates (checkForUpdates)
-import Hasura.Server.Init
+import Hasura.Server.Init hiding (checkFeatureFlag)
 import Hasura.Server.Limits
 import Hasura.Server.Logging
 import Hasura.Server.Metrics (ServerMetrics (..))
@@ -345,8 +345,9 @@ initialiseServerCtx ::
   ServerMetrics ->
   PrometheusMetrics ->
   Tracing.SamplingPolicy ->
+  (FeatureFlag -> IO Bool) ->
   ManagedT m ServerCtx
-initialiseServerCtx env GlobalCtx {..} serveOptions@ServeOptions {..} liveQueryHook serverMetrics prometheusMetrics traceSamplingPolicy = do
+initialiseServerCtx env GlobalCtx {..} serveOptions@ServeOptions {..} liveQueryHook serverMetrics prometheusMetrics traceSamplingPolicy checkFeatureFlag = do
   instanceId <- liftIO generateInstanceId
   latch <- liftIO newShutdownLatch
   loggers@(Loggers loggerCtx logger pgLogger) <- mkLoggers soEnabledLogTypes soLogLevel
@@ -382,7 +383,7 @@ initialiseServerCtx env GlobalCtx {..} serveOptions@ServeOptions {..} liveQueryH
                     _ppsConnectionLifetime = PG.cpMbLifetime soConnParams
                   }
               sourceConnInfo = PostgresSourceConnInfo dbUrlConf (Just connSettings) (PG.cpAllowPrepare soConnParams) soTxIso Nothing
-           in PostgresConnConfiguration sourceConnInfo Nothing defaultPostgresExtensionsSchema
+           in PostgresConnConfiguration sourceConnInfo Nothing defaultPostgresExtensionsSchema Nothing mempty
       optimizePermissionFilters
         | EFOptimizePermissionFilters `elem` soExperimentalFeatures = Options.OptimizePermissionFilters
         | otherwise = Options.Don'tOptimizePermissionFilters
@@ -403,7 +404,7 @@ initialiseServerCtx env GlobalCtx {..} serveOptions@ServeOptions {..} liveQueryH
           soReadOnlyMode
           soDefaultNamingConvention
           soMetadataDefaults
-          defaultUsePQNP
+          checkFeatureFlag
 
   rebuildableSchemaCache <-
     lift . flip onException (flushLogger loggerCtx) $
@@ -464,7 +465,8 @@ initialiseServerCtx env GlobalCtx {..} serveOptions@ServeOptions {..} liveQueryH
         scShutdownLatch = latch,
         scMetaVersionRef = metaVersionRef,
         scPrometheusMetrics = prometheusMetrics,
-        scTraceSamplingPolicy = traceSamplingPolicy
+        scTraceSamplingPolicy = traceSamplingPolicy,
+        scCheckFeatureFlag = checkFeatureFlag
       }
 
 mkLoggers ::
@@ -606,10 +608,11 @@ runHGEServer ::
   -- | A hook which can be called to indicate when the server is started succesfully
   Maybe (IO ()) ->
   EKG.Store EKG.EmptyMetrics ->
+  (FeatureFlag -> IO Bool) ->
   ManagedT m ()
-runHGEServer setupHook env serveOptions serverCtx@ServerCtx {..} initTime startupStatusHook ekgStore = do
+runHGEServer setupHook env serveOptions serverCtx@ServerCtx {..} initTime startupStatusHook ekgStore checkFeatureFlag = do
   waiApplication <-
-    mkHGEServer setupHook env serveOptions serverCtx ekgStore
+    mkHGEServer setupHook env serveOptions serverCtx ekgStore checkFeatureFlag
 
   let logger = _lsLogger $ scLoggers
   -- `startupStatusHook`: add `Service started successfully` message to config_status
@@ -692,8 +695,9 @@ mkHGEServer ::
   ServeOptions impl ->
   ServerCtx ->
   EKG.Store EKG.EmptyMetrics ->
+  (FeatureFlag -> IO Bool) ->
   ManagedT m Application
-mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = do
+mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore checkFeatureFlag = do
   -- Comment this to enable expensive assertions from "GHC.AssertNF". These
   -- will log lines to STDOUT containing "not in normal form". In the future we
   -- could try to integrate this into our tests. For now this is a development
@@ -744,7 +748,7 @@ mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = 
           soReadOnlyMode
           soDefaultNamingConvention
           soMetadataDefaults
-          defaultUsePQNP
+          checkFeatureFlag
 
   -- Log Warning if deprecated environment variables are used
   sources <- scSources <$> liftIO (getSchemaCache cacheRef)
@@ -860,7 +864,7 @@ mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = 
       -- event triggers should be tied to the life cycle of a source
       lockedEvents <- readTVarIO leEvents
       forM_ sources $ \backendSourceInfo -> do
-        AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo sourceName _ _ sourceConfig _ _ :: SourceInfo b) -> do
+        AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo sourceName _ _ _ sourceConfig _ _ :: SourceInfo b) -> do
           let sourceNameText = sourceNameToText sourceName
           logger $ mkGenericLog LevelInfo "event_triggers" $ "unlocking events of source: " <> sourceNameText
           for_ (HM.lookup sourceName lockedEvents) $ \sourceLockedEvents -> do
@@ -946,6 +950,13 @@ mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = 
                 (length <$> readTVarIO (leEvents lockedEventsCtx))
                 (EventTriggerShutdownAction (shutdownEventTriggerEvents allSources logger lockedEventsCtx))
                 (unrefine soGracefulShutdownTimeout)
+
+        -- Create logger for logging the statistics of events fetched
+        fetchedEventsStatsLogger <-
+          allocate
+            (createFetchedEventsStatsLogger logger)
+            (closeFetchedEventsStatsLogger logger)
+
         unLogger logger $ mkGenericLog @Text LevelInfo "event_triggers" "starting workers"
         void
           $ C.forkManagedTWithGracefulShutdown
@@ -954,6 +965,7 @@ mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = 
             (C.ThreadShutdown (liftIO eventsGracefulShutdownAction))
           $ processEventQueue
             logger
+            fetchedEventsStatsLogger
             scManager
             (getSchemaCache cacheRef)
             eventEngineCtx
@@ -1003,6 +1015,12 @@ mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = 
       -- prepare scheduled triggers
       lift $ prepareScheduledEvents logger
 
+      -- Create logger for logging the statistics of scheduled events fetched
+      scheduledEventsStatsLogger <-
+        allocate
+          (createFetchedScheduledEventsStatsLogger logger)
+          (closeFetchedScheduledEventsStatsLogger logger)
+
       -- start a background thread to deliver the scheduled events
       -- _scheduledEventsThread <- do
       let scheduledEventsGracefulShutdownAction =
@@ -1024,6 +1042,7 @@ mkHGEServer setupHook env ServeOptions {..} serverCtx@ServerCtx {..} ekgStore = 
         $ processScheduledTriggers
           env
           logger
+          scheduledEventsStatsLogger
           scManager
           scPrometheusMetrics
           (getSchemaCache cacheRef)
@@ -1270,7 +1289,7 @@ mkPgSourceResolver pgLogger _ config = runExceptT do
           }
   pgPool <- liftIO $ Q.initPGPool connInfo connParams pgLogger
   let pgExecCtx = mkPGExecCtx isoLevel pgPool NeverResizePool
-  pure $ PGSourceConfig pgExecCtx connInfo Nothing mempty $ _pccExtensionsSchema config
+  pure $ PGSourceConfig pgExecCtx connInfo Nothing mempty (_pccExtensionsSchema config) mempty Nothing
 
 mkMSSQLSourceResolver :: SourceResolver ('MSSQL)
 mkMSSQLSourceResolver _name (MSSQLConnConfiguration connInfo _) = runExceptT do

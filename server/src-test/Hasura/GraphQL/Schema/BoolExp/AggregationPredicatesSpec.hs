@@ -320,6 +320,7 @@ spec = do
         { _siName = SNDefault,
           _siTables = makeTableCache [albumTableInfo, trackTableInfo],
           _siFunctions = mempty,
+          _siNativeQueries = mempty,
           _siConfiguration = notImplementedYet "SourceConfig",
           _siQueryTagsConfig = Nothing,
           _siCustomization = ResolvedSourceCustomization mempty mempty HasuraCase Nothing

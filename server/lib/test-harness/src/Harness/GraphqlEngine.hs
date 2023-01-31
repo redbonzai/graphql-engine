@@ -13,6 +13,7 @@ module Harness.GraphqlEngine
     postMetadata_,
     postMetadata,
     postMetadataWithStatus,
+    postMetadataWithStatusAndHeaders,
     postExplain,
     exportMetadata,
     reloadMetadata,
@@ -63,6 +64,7 @@ import Hasura.Logging (Hasura)
 import Hasura.Prelude
 import Hasura.Server.App (Loggers (..), ServerCtx (..))
 import Hasura.Server.Init (PostgresConnInfo (..), ServeOptions (..), unsafePort)
+import Hasura.Server.Init.FeatureFlag qualified as FeatureFlag
 import Hasura.Server.Metrics (ServerMetricsSpec, createServerMetrics)
 import Hasura.Server.Prometheus (makeDummyPrometheusMetrics)
 import Hasura.Tracing (sampleAlways)
@@ -210,6 +212,10 @@ postMetadataWithStatus :: HasCallStack => Int -> TestEnvironment -> Value -> IO 
 postMetadataWithStatus statusCode testEnvironment v =
   withFrozenCallStack $ postWithHeadersStatus statusCode testEnvironment "/v1/metadata" mempty v
 
+postMetadataWithStatusAndHeaders :: HasCallStack => Int -> TestEnvironment -> Http.RequestHeaders -> Value -> IO Value
+postMetadataWithStatusAndHeaders statusCode testEnvironment =
+  withFrozenCallStack $ postWithHeadersStatus statusCode testEnvironment "/v1/metadata"
+
 -- | Resets metadata, removing all sources or remote schemas.
 --
 -- Note: We add 'withFrozenCallStack' to reduce stack trace clutter.
@@ -308,32 +314,28 @@ runApp serveOptions = do
           { _pciDatabaseConn = Nothing,
             _pciRetries = Nothing
           }
-      metadataDbUrl = Just $ Constants.postgresqlMetadataConnectionString
+      metadataDbUrl = Just Constants.postgresqlMetadataConnectionString
   env <- Env.getEnvironment
   initTime <- liftIO getCurrentTime
   globalCtx <- App.initGlobalCtx env metadataDbUrl rci
-  do
-    (ekgStore, serverMetrics) <-
-      liftIO $ do
-        store <- EKG.newStore @TestMetricsSpec
-        serverMetrics <-
-          liftIO $ createServerMetrics $ EKG.subset ServerSubset store
-        pure (EKG.subset EKG.emptyOf store, serverMetrics)
-    prometheusMetrics <- makeDummyPrometheusMetrics
-    runManagedT (App.initialiseServerCtx env globalCtx serveOptions Nothing serverMetrics prometheusMetrics sampleAlways) $ \serverCtx@ServerCtx {..} ->
-      do
-        let Loggers _ _ pgLogger = scLoggers
-        flip App.runPGMetadataStorageAppT (scMetadataDbPool, pgLogger)
-          . lowerManagedT
-          $ do
-            App.runHGEServer
-              (const $ pure ())
-              env
-              serveOptions
-              serverCtx
-              initTime
-              Nothing
-              ekgStore
+  (ekgStore, serverMetrics) <- liftIO do
+    store <- EKG.newStore @TestMetricsSpec
+    serverMetrics <- liftIO . createServerMetrics $ EKG.subset ServerSubset store
+    pure (EKG.subset EKG.emptyOf store, serverMetrics)
+  prometheusMetrics <- makeDummyPrometheusMetrics
+  let managedServerCtx = App.initialiseServerCtx env globalCtx serveOptions Nothing serverMetrics prometheusMetrics sampleAlways (FeatureFlag.checkFeatureFlag env)
+  runManagedT managedServerCtx \serverCtx@ServerCtx {..} -> do
+    let Loggers _ _ pgLogger = scLoggers
+    flip App.runPGMetadataStorageAppT (scMetadataDbPool, pgLogger) . lowerManagedT $
+      App.runHGEServer
+        (const $ pure ())
+        env
+        serveOptions
+        serverCtx
+        initTime
+        Nothing
+        ekgStore
+        (FeatureFlag.checkFeatureFlag env)
 
 -- | Used only for 'runApp' above.
 data TestMetricsSpec name metricType tags

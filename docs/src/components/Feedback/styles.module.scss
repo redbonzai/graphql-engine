@@ -127,9 +127,13 @@ html[data-theme='dark'] {
 }
 
 html[data-theme='dark'] {
-  input,
-  textarea {
-    background-color: white;
+  .feedback {
+
+    input,
+    textarea {
+      background-color: var(--color-gray-74);
+      color: white;
+    }
   }
 }
 
@@ -181,7 +185,7 @@ html[data-theme='dark'] {
     justify-content: flex-end;
 }
 
-span {
+.star {
   transition: .1s ease-out;
   cursor: pointer;
   &:hover {

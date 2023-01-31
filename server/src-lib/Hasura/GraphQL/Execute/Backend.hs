@@ -54,7 +54,10 @@ import Network.HTTP.Types qualified as HTTP
 class
   ( Backend b,
     ToTxt (MultiplexedQuery b),
-    Monad (ExecutionMonad b)
+    Monad (ExecutionMonad b),
+    Show (ResolvedConnectionTemplate b),
+    Eq (ResolvedConnectionTemplate b),
+    Hashable (ResolvedConnectionTemplate b)
   ) =>
   BackendExecute (b :: BackendType)
   where
@@ -75,6 +78,8 @@ class
     SourceName ->
     SourceConfig b ->
     QueryDB b Void (UnpreparedValue b) ->
+    [HTTP.Header] ->
+    Maybe G.Name ->
     m (DBStepInfo b)
   mkDBMutationPlan ::
     forall m.
@@ -83,10 +88,13 @@ class
       MonadReader QueryTagsComment m
     ) =>
     UserInfo ->
+    Env.Environment ->
     Options.StringifyNumbers ->
     SourceName ->
     SourceConfig b ->
     MutationDB b Void (UnpreparedValue b) ->
+    [HTTP.Header] ->
+    Maybe G.Name ->
     m (DBStepInfo b)
   mkLiveQuerySubscriptionPlan ::
     forall m.
@@ -100,6 +108,8 @@ class
     SourceConfig b ->
     Maybe G.Name ->
     RootFieldMap (QueryDB b Void (UnpreparedValue b)) ->
+    [HTTP.Header] ->
+    Maybe G.Name ->
     m (SubscriptionQueryPlan b (MultiplexedQuery b))
   mkDBStreamingSubscriptionPlan ::
     forall m.
@@ -112,6 +122,8 @@ class
     SourceName ->
     SourceConfig b ->
     (RootFieldAlias, (QueryDB b Void (UnpreparedValue b))) ->
+    [HTTP.Header] ->
+    Maybe G.Name ->
     m (SubscriptionQueryPlan b (MultiplexedQuery b))
   mkDBQueryExplain ::
     forall m.
@@ -122,6 +134,8 @@ class
     SourceName ->
     SourceConfig b ->
     QueryDB b Void (UnpreparedValue b) ->
+    [HTTP.Header] ->
+    Maybe G.Name ->
     m (AB.AnyBackend DBStepInfo)
   mkSubscriptionExplain ::
     ( MonadError QErr m,
@@ -150,6 +164,8 @@ class
     -- to be returned as either a number or a string with a number in it
     FieldName ->
     (FieldName, SourceRelationshipSelection b Void UnpreparedValue) ->
+    [HTTP.Header] ->
+    Maybe G.Name ->
     Options.StringifyNumbers ->
     m (DBStepInfo b)
 
@@ -222,7 +238,8 @@ data DBStepInfo b = DBStepInfo
   { dbsiSourceName :: SourceName,
     dbsiSourceConfig :: SourceConfig b,
     dbsiPreparedQuery :: Maybe (PreparedQuery b),
-    dbsiAction :: ExecutionMonad b EncJSON
+    dbsiAction :: ExecutionMonad b EncJSON,
+    dbsiResolvedConnectionTemplate :: ResolvedConnectionTemplate b
   }
 
 -- | The result of an explain query: for a given root field (denoted by its name): the generated SQL

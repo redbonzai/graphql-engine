@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -12,6 +13,7 @@ module Hasura.RQL.Types.Source
     unsafeSourceName,
     unsafeSourceTables,
     siConfiguration,
+    siNativeQueries,
     siFunctions,
     siName,
     siQueryTagsConfig,
@@ -19,7 +21,7 @@ module Hasura.RQL.Types.Source
     siCustomization,
 
     -- * Schema cache
-    ResolvedSource (..),
+    DBObjectsIntrospection (..),
     ScalarMap (..),
 
     -- * Source resolver
@@ -41,6 +43,7 @@ where
 
 import Control.Lens hiding ((.=))
 import Data.Aeson.Extended
+import Data.HashMap.Strict qualified as Map
 import Database.PG.Query qualified as PG
 import Hasura.Base.Error
 import Hasura.Logging qualified as L
@@ -50,6 +53,7 @@ import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Function
 import Hasura.RQL.Types.HealthCheck
 import Hasura.RQL.Types.Instances ()
+import Hasura.RQL.Types.Metadata.Common (NativeQueries)
 import Hasura.RQL.Types.QueryTags
 import Hasura.RQL.Types.SourceCustomization
 import Hasura.RQL.Types.Table
@@ -66,6 +70,7 @@ data SourceInfo b = SourceInfo
   { _siName :: SourceName,
     _siTables :: TableCache b,
     _siFunctions :: FunctionCache b,
+    _siNativeQueries :: NativeQueries b,
     _siConfiguration :: ~(SourceConfig b),
     _siQueryTagsConfig :: Maybe QueryTagsConfig,
     _siCustomization :: ResolvedSourceCustomization
@@ -108,7 +113,7 @@ unsafeSourceInfo = AB.unpackAnyBackend
 unsafeSourceName :: BackendSourceInfo -> SourceName
 unsafeSourceName bsi = AB.dispatchAnyBackend @Backend bsi go
   where
-    go (SourceInfo name _ _ _ _ _) = name
+    go (SourceInfo name _ _ _ _ _ _) = name
 
 unsafeSourceTables :: forall b. HasTag b => BackendSourceInfo -> Maybe (TableCache b)
 unsafeSourceTables = fmap _siTables . unsafeSourceInfo @b
@@ -122,18 +127,27 @@ unsafeSourceConfiguration = fmap _siConfiguration . unsafeSourceInfo @b
 --------------------------------------------------------------------------------
 -- Schema cache
 
--- | Contains Postgres connection configuration and essential metadata from the
--- database to build schema cache for tables and function.
-data ResolvedSource b = ResolvedSource
-  { _rsConfig :: SourceConfig b,
-    _rsCustomization :: SourceTypeCustomization,
-    _rsTables :: DBTablesMetadata b,
+-- | Contains metadata (introspection) from the database, used to build the
+-- schema cache.  This type only contains results of introspecting DB objects,
+-- i.e. the DB types specified by tables, functions, and scalars.  Notably, it
+-- does not include the additional introspection that takes place on Postgres,
+-- namely reading the contents of tables used as Enum Values -- see
+-- @fetchAndValidateEnumValues@.
+data DBObjectsIntrospection b = DBObjectsIntrospection
+  { _rsTables :: DBTablesMetadata b,
     _rsFunctions :: DBFunctionsMetadata b,
     _rsScalars :: ScalarMap b
   }
-  deriving (Eq)
+  deriving (Eq, Generic)
 
-instance (L.ToEngineLog (ResolvedSource b) L.Hasura) where
+instance Backend b => FromJSON (DBObjectsIntrospection b) where
+  parseJSON = withObject "DBObjectsIntrospection" \o -> do
+    tables <- o .: "tables"
+    functions <- o .: "functions"
+    scalars <- o .: "scalars"
+    pure $ DBObjectsIntrospection (Map.fromList tables) (Map.fromList functions) (ScalarMap (Map.fromList scalars))
+
+instance (L.ToEngineLog (DBObjectsIntrospection b) L.Hasura) where
   toEngineLog _ = (L.LevelDebug, L.ELTStartup, toJSON rsLog)
     where
       rsLog =
@@ -143,16 +157,10 @@ instance (L.ToEngineLog (ResolvedSource b) L.Hasura) where
           ]
 
 -- | A map from GraphQL name to equivalent scalar type for a given backend.
-data ScalarMap b where
-  ScalarMap :: Backend b => HashMap G.Name (ScalarType b) -> ScalarMap b
+newtype ScalarMap b = ScalarMap (HashMap G.Name (ScalarType b))
+  deriving newtype (Semigroup, Monoid)
 
-deriving stock instance Eq (ScalarMap b)
-
-instance Backend b => Semigroup (ScalarMap b) where
-  ScalarMap s1 <> ScalarMap s2 = ScalarMap $ s1 <> s2
-
-instance Backend b => Monoid (ScalarMap b) where
-  mempty = ScalarMap mempty
+deriving stock instance Backend b => Eq (ScalarMap b)
 
 --------------------------------------------------------------------------------
 -- Source resolver

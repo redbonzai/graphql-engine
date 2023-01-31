@@ -52,6 +52,7 @@ import Hasura.RQL.Types.Backend
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.CustomTypes
 import Hasura.RQL.Types.Function
+import Hasura.RQL.Types.Metadata.Common (NativeQueries)
 import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.Permission
 import Hasura.RQL.Types.QueryTags
@@ -328,7 +329,7 @@ buildRoleContext options sources remotes actions customTypes role remoteSchemaPe
           [FieldParser P.Parse (NamespacedField (QueryRootField UnpreparedValue))],
           [(G.Name, Parser 'Output P.Parse (ApolloFederationParserFunction P.Parse))]
         )
-    buildSource schemaContext schemaOptions sourceInfo@(SourceInfo _ tables functions _ _ sourceCustomization) =
+    buildSource schemaContext schemaOptions sourceInfo@(SourceInfo _ tables functions nativeQueries _ _ sourceCustomization) =
       runSourceSchema schemaContext schemaOptions sourceInfo do
         let validFunctions = takeValidFunctions functions
             validTables = takeValidTables tables
@@ -336,11 +337,13 @@ buildRoleContext options sources remotes actions customTypes role remoteSchemaPe
             makeTypename = SC._rscTypeNames sourceCustomization
         (uncustomizedQueryRootFields, uncustomizedSubscriptionRootFields, apolloFedTableParsers) <-
           buildQueryAndSubscriptionFields mkRootFieldName sourceInfo validTables validFunctions
+        (nativeQueryRootFields) <-
+          buildNativeQueryFields sourceInfo nativeQueries
         (,,,,apolloFedTableParsers)
           <$> customizeFields
             sourceCustomization
             (makeTypename <> MkTypename (<> Name.__query))
-            (pure uncustomizedQueryRootFields)
+            (pure (uncustomizedQueryRootFields <> nativeQueryRootFields))
           <*> customizeFields
             sourceCustomization
             (makeTypename <> MkTypename (<> Name.__mutation_frontend))
@@ -453,7 +456,7 @@ buildRelayRoleContext options sources actions customTypes role expFeatures = do
           [FieldParser P.Parse (NamespacedField (MutationRootField UnpreparedValue))],
           [FieldParser P.Parse (NamespacedField (QueryRootField UnpreparedValue))]
         )
-    buildSource schemaContext schemaOptions sourceInfo@(SourceInfo _ tables functions _ _ sourceCustomization) = do
+    buildSource schemaContext schemaOptions sourceInfo@(SourceInfo _ tables functions _customSQL _ _ sourceCustomization) = do
       runSourceSchema schemaContext schemaOptions sourceInfo do
         let validFunctions = takeValidFunctions functions
             validTables = takeValidTables tables
@@ -669,6 +672,33 @@ buildQueryAndSubscriptionFields mkRootFieldName sourceInfo tables (takeExposedAs
     )
   where
     mkRFs = mkRootFields sourceName sourceConfig queryTagsConfig QDBR
+    mkRF = mkRootField sourceName sourceConfig queryTagsConfig QDBR
+    sourceName = _siName sourceInfo
+    sourceConfig = _siConfiguration sourceInfo
+    queryTagsConfig = _siQueryTagsConfig sourceInfo
+
+runMaybeTmempty :: (Monad m, Monoid a) => MaybeT m a -> m a
+runMaybeTmempty = (`onNothingM` (pure mempty)) . runMaybeT
+
+buildNativeQueryFields ::
+  forall b r m n.
+  MonadBuildSchema b r m n =>
+  SourceInfo b ->
+  NativeQueries b ->
+  SchemaT r m [P.FieldParser n (QueryRootField UnpreparedValue)]
+buildNativeQueryFields sourceInfo nativeQueries = runMaybeTmempty $ do
+  roleName <- retrieve scRole
+
+  -- Native queries are only enabled for the admin role, pending the design of
+  -- permissions for native queries.
+  guard $ roleName == adminRoleName
+
+  map mkRF . catMaybes <$> for nativeQueries \nativeQuery -> do
+    lift $ (buildNativeQueryRootFields nativeQuery)
+  where
+    mkRF ::
+      FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b)) ->
+      FieldParser n (QueryRootField UnpreparedValue)
     mkRF = mkRootField sourceName sourceConfig queryTagsConfig QDBR
     sourceName = _siName sourceInfo
     sourceConfig = _siConfiguration sourceInfo

@@ -17,7 +17,6 @@ module Hasura.Server.Types
     HasServerConfigCtx (..),
     askMetadataDefaults,
     getRequestId,
-    defaultUsePQNP,
   )
 where
 
@@ -30,6 +29,7 @@ import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Prelude hiding (intercalate)
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.Metadata (MetadataDefaults)
+import Hasura.Server.Init.FeatureFlag (FeatureFlag)
 import Hasura.Server.Utils
 import Network.HTTP.Types qualified as HTTP
 
@@ -147,9 +147,9 @@ data ServerConfigCtx = ServerConfigCtx
     _sccEventingMode :: EventingMode,
     _sccReadOnlyMode :: ReadOnlyMode,
     -- | stores global default naming convention
-    _sccDefaultNamingConvention :: Maybe NamingCase,
+    _sccDefaultNamingConvention :: NamingCase,
     _sccMetadataDefaults :: MetadataDefaults,
-    _sccUsePQNP :: IO Bool
+    _sccCheckFeatureFlag :: FeatureFlag -> IO Bool
   }
 
 askMetadataDefaults :: HasServerConfigCtx m => m MetadataDefaults
@@ -168,6 +168,3 @@ instance HasServerConfigCtx m => HasServerConfigCtx (ExceptT e m) where
 
 instance HasServerConfigCtx m => HasServerConfigCtx (StateT s m) where
   askServerConfigCtx = lift askServerConfigCtx
-
-defaultUsePQNP :: IO Bool
-defaultUsePQNP = pure False

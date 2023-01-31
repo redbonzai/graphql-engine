@@ -7,6 +7,7 @@ library
     , Spock-core
     , aeson
     , aeson-pretty
+    , aeson-qq
     , async
     , attoparsec
     , base
@@ -49,7 +50,6 @@ library
     , resourcet
     , safe
     , safe-exceptions
-    , scientific
     , servant-server
     , sop-core
     , stm
@@ -93,7 +93,24 @@ library
     TypeApplications
     TypeSynonymInstances
 
-  ghc-options: -Wall -Werror
+  ghc-options:
+    -Werror
+    -- Taken from https://medium.com/mercury-bank/enable-all-the-warnings-a0517bc081c3
+    -Weverything
+    -Wno-missing-exported-signatures
+    -Wno-missing-import-lists
+    -Wno-missed-specialisations
+    -Wno-all-missed-specialisations
+    -Wno-unsafe
+    -Wno-safe
+    -Wno-missing-local-signatures
+    -Wno-monomorphism-restriction
+    -Wno-missing-kind-signatures
+    -Wno-missing-safe-haskell-mode
+    -- We want these warnings, but the code doesn't satisfy them yet:
+    -Wno-missing-deriving-strategies
+    -Wno-unused-packages
+    -Wno-redundant-constraints
 
   exposed-modules:
     Harness.Backend.BigQuery

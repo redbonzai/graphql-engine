@@ -21,6 +21,8 @@ module Hasura.Server.API.Backend
     tableCommands,
     tablePermissionsCommands,
     computedFieldCommands,
+    connectionTemplateCommands,
+    nativeAccessCommands,
   )
 where
 
@@ -158,4 +160,16 @@ computedFieldCommands :: forall (b :: BackendType). Backend b => [CommandParser 
 computedFieldCommands =
   [ commandParser "add_computed_field" $ RMAddComputedField . mkAnyBackend @b,
     commandParser "drop_computed_field" $ RMDropComputedField . mkAnyBackend @b
+  ]
+
+connectionTemplateCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
+connectionTemplateCommands =
+  [ commandParser "test_connection_template" $ RMTestConnectionTemplate . mkAnyBackend @b
+  ]
+
+nativeAccessCommands :: forall (b :: BackendType). Backend b => [CommandParser b]
+nativeAccessCommands =
+  [ commandParser "get_native_query" $ RMGetNativeQuery . mkAnyBackend @b,
+    commandParser "track_native_query" $ RMTrackNativeQuery . mkAnyBackend @b,
+    commandParser "untrack_native_query" $ RMUntrackNativeQuery . mkAnyBackend @b
   ]

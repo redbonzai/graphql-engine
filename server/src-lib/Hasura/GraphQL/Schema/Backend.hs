@@ -43,6 +43,7 @@ import Hasura.GraphQL.ApolloFederation (ApolloFederationParserFunction)
 import Hasura.GraphQL.Schema.Common
 import Hasura.GraphQL.Schema.NamingCase
 import Hasura.GraphQL.Schema.Parser hiding (Type)
+import Hasura.NativeQuery.Types
 import Hasura.Prelude
 import Hasura.RQL.IR
 import Hasura.RQL.IR.Insert qualified as IR
@@ -179,6 +180,15 @@ class
     FunctionInfo b ->
     TableName b ->
     SchemaT r m [FieldParser n (MutationDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))]
+
+  buildNativeQueryRootFields ::
+    MonadBuildSchema b r m n =>
+    NativeQueryInfo b ->
+    SchemaT
+      r
+      m
+      (Maybe (FieldParser n (QueryDB b (RemoteRelationshipField UnpreparedValue) (UnpreparedValue b))))
+  buildNativeQueryRootFields _ = pure Nothing
 
   -- | Make a parser for relationships. Default implementaton elides
   -- relationships altogether.

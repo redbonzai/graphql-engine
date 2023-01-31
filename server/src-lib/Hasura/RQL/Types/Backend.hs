@@ -21,6 +21,8 @@ import Data.Text.Extended
 import Data.Typeable (Typeable)
 import Hasura.Base.Error
 import Hasura.Base.ToErrorValue
+import Hasura.EncJSON (EncJSON)
+import Hasura.NativeQuery.Types
 import Hasura.Prelude
 import Hasura.RQL.Types.Common
 import Hasura.RQL.Types.HealthCheckImplementation (HealthCheckImplementation)
@@ -69,24 +71,25 @@ data SupportedNamingCase = OnlyHasuraCase | AllConventions
 -- type application or a 'Proxy' parameter to disambiguate between
 -- different backends at the call site.
 class
-  ( Representable (TableName b),
-    Representable (FunctionName b),
-    Representable (FunctionArgument b),
-    Representable (ConstraintName b),
-    Representable (BasicOrderType b),
-    Representable (NullsOrderType b),
+  ( Representable (BasicOrderType b),
     Representable (Column b),
-    Representable (ScalarType b),
-    Representable (SQLExpression b),
-    Representable (ScalarSelectionArguments b),
-    Representable (SourceConnConfiguration b),
-    Representable (ExtraTableMetadata b),
-    Representable (XComputedField b),
     Representable (ComputedFieldDefinition b),
     Representable (ComputedFieldImplicitArguments b),
     Representable (ComputedFieldReturn b),
+    Representable (ConstraintName b),
+    Representable (ExtraTableMetadata b),
+    Representable (FunctionArgument b),
+    Representable (FunctionName b),
     Representable (HealthCheckTest b),
+    Representable (NullsOrderType b),
+    Representable (SQLExpression b),
+    Representable (ScalarSelectionArguments b),
+    Representable (ScalarType b),
+    Representable (SourceConnConfiguration b),
+    Representable (XComputedField b),
+    Representable (TableName b),
     Eq (RawFunctionInfo b),
+    Representable (ResolvedConnectionTemplate b),
     Ord (TableName b),
     Ord (FunctionName b),
     Ord (ScalarType b),
@@ -94,16 +97,18 @@ class
     Data (TableName b),
     FromJSON (BackendConfig b),
     FromJSON (BackendInfo b),
-    FromJSON (Column b),
-    FromJSON (ConstraintName b),
-    FromJSON (FunctionName b),
-    FromJSON (ScalarType b),
-    FromJSON (TableName b),
-    FromJSON (SourceConnConfiguration b),
-    FromJSON (ExtraTableMetadata b),
-    FromJSON (ComputedFieldDefinition b),
     FromJSON (BackendSourceKind b),
+    FromJSON (Column b),
+    FromJSON (ComputedFieldDefinition b),
+    FromJSON (ConnectionTemplateRequestContext b),
+    FromJSON (ConstraintName b),
+    FromJSON (ExtraTableMetadata b),
+    FromJSON (FunctionName b),
     FromJSON (HealthCheckTest b),
+    FromJSON (RawFunctionInfo b),
+    FromJSON (ScalarType b),
+    FromJSON (SourceConnConfiguration b),
+    FromJSON (TableName b),
     FromJSONKey (Column b),
     HasCodec (BackendSourceKind b),
     HasCodec (Column b),
@@ -126,6 +131,7 @@ class
     ToJSON (ComputedFieldImplicitArguments b),
     ToJSON (ComputedFieldReturn b),
     ToJSON (HealthCheckTest b),
+    ToJSON (ResolvedConnectionTemplate b),
     ToJSONKey (Column b),
     ToJSONKey (FunctionName b),
     ToJSONKey (ScalarType b),
@@ -178,7 +184,11 @@ class
     Traversable (BackendInsert b),
     Functor (AggregationPredicates b),
     Foldable (AggregationPredicates b),
-    Traversable (AggregationPredicates b)
+    Traversable (AggregationPredicates b),
+    Functor (NativeQuery b),
+    Foldable (NativeQuery b),
+    Traversable (NativeQuery b),
+    NativeQueryMetadata b
   ) =>
   Backend (b :: BackendType)
   where
@@ -309,6 +319,15 @@ class
 
   type BackendInsert b = Const Void
 
+  -- | Intermediate representation of Native Queries
+  -- The default implementation makes native queries uninstantiable.
+  --
+  -- It is parameterised over the type of fields, which changes during the IR
+  -- translation phases.
+  type NativeQuery b :: Type -> Type
+
+  type NativeQuery b = Const Void
+
   -- extension types
   type XComputedField b :: Type
   type XRelay b :: Type
@@ -321,6 +340,18 @@ class
   type XNestedInserts b :: Type
 
   type XStreamingSubscription b :: Type
+
+  -- The result of dynamic connection template resolution
+  type ResolvedConnectionTemplate b :: Type
+  type ResolvedConnectionTemplate b = () -- Uninmplemented value
+
+  -- The request context for dynamic connection template resolution. This is
+  -- defined for the `<backend>_test_connection_template` metadata API
+  type ConnectionTemplateRequestContext b :: Type
+  type ConnectionTemplateRequestContext b = () -- Uninmplemented value
+
+  resolveConnectionTemplate :: SourceConfig b -> ConnectionTemplateRequestContext b -> Either QErr EncJSON
+  resolveConnectionTemplate _ _ = Left (err400 (NotSupported) "connection template is not implemented")
 
   -- functions on types
   isComparableType :: ScalarType b -> Bool

@@ -4,6 +4,7 @@
 module Hasura.Backends.DataConnector.Adapter.Metadata () where
 
 import Control.Arrow.Extended
+import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Aeson qualified as J
 import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
@@ -38,8 +39,7 @@ import Hasura.RQL.Types.Metadata.Backend (BackendMetadata (..))
 import Hasura.RQL.Types.Metadata.Object
 import Hasura.RQL.Types.SchemaCache qualified as SchemaCache
 import Hasura.RQL.Types.SchemaCache.Build
-import Hasura.RQL.Types.Source (ResolvedSource (..))
-import Hasura.RQL.Types.SourceCustomization (SourceTypeCustomization)
+import Hasura.RQL.Types.Source (DBObjectsIntrospection (..))
 import Hasura.RQL.Types.Table (ForeignKey (_fkConstraint))
 import Hasura.RQL.Types.Table qualified as RQL.T.T
 import Hasura.SQL.Backend (BackendSourceKind (..), BackendType (..))
@@ -81,6 +81,7 @@ resolveBackendInfo' ::
     Inc.ArrowDistribute arr,
     ArrowWriter (Seq (Either InconsistentMetadata MetadataDependency)) arr,
     MonadIO m,
+    MonadBaseControl IO m,
     HasHttpManagerM m
   ) =>
   Logger Hasura ->
@@ -101,6 +102,7 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
         Inc.ArrowCache m arr,
         ArrowWriter (Seq (Either InconsistentMetadata MetadataDependency)) arr,
         MonadIO m,
+        MonadBaseControl IO m,
         HasHttpManagerM m
       ) =>
       (Inc.Dependency (Maybe (HashMap DC.DataConnectorName Inc.InvalidationKey)), DC.DataConnectorName, DC.DataConnectorOptions) `arr` Maybe DC.DataConnectorInfo
@@ -115,7 +117,7 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
         |) metadataObj
 
     getDataConnectorCapabilities ::
-      MonadIO m =>
+      (MonadIO m, MonadBaseControl IO m) =>
       DC.DataConnectorOptions ->
       HTTP.Manager ->
       m (Either QErr DC.DataConnectorInfo)
@@ -131,7 +133,7 @@ resolveBackendInfo' logger = proc (invalidationKeys, optionsMap) -> do
       capabilitiesCase defaultAction capabilitiesAction errorAction capabilitiesU
 
 resolveSourceConfig' ::
-  MonadIO m =>
+  (MonadIO m, MonadBaseControl IO m) =>
   Logger Hasura ->
   SourceName ->
   DC.ConnSourceConfig ->
@@ -183,9 +185,8 @@ resolveDatabaseMetadata' ::
   Applicative m =>
   SourceMetadata 'DataConnector ->
   DC.SourceConfig ->
-  SourceTypeCustomization ->
-  m (Either QErr (ResolvedSource 'DataConnector))
-resolveDatabaseMetadata' _ sc@DC.SourceConfig {_scSchema = API.SchemaResponse {..}, ..} customization =
+  m (Either QErr (DBObjectsIntrospection 'DataConnector))
+resolveDatabaseMetadata' _ DC.SourceConfig {_scSchema = API.SchemaResponse {..}, ..} =
   let foreignKeys = fmap API._tiForeignKeys _srTables
       tables = Map.fromList $ do
         API.TableInfo {..} <- _srTables
@@ -218,10 +219,8 @@ resolveDatabaseMetadata' _ sc@DC.SourceConfig {_scSchema = API.SchemaResponse {.
         pure (coerce _tiName, meta)
    in pure $
         pure $
-          ResolvedSource
-            { _rsConfig = sc,
-              _rsCustomization = customization,
-              _rsTables = tables,
+          DBObjectsIntrospection
+            { _rsTables = tables,
               _rsFunctions = mempty,
               _rsScalars = mempty
             }

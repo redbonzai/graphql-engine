@@ -2,7 +2,7 @@ cabal-version: 3.0
 name: dc-api
 version: 1.0.0
 extra-source-files:
-  test/Test/Data/ChinookData.xml.gz
+  test/Test/Data/Chinook.xml.gz
   test/Test/Data/schema-tables.json
 
 flag profiling
@@ -37,6 +37,24 @@ common common-all
     TypeApplications
     TypeFamilies
     TypeOperators
+  ghc-options:
+    -- Taken from https://medium.com/mercury-bank/enable-all-the-warnings-a0517bc081c3
+    -Weverything
+    -Wno-missing-exported-signatures
+    -Wno-missing-import-lists
+    -Wno-missed-specialisations
+    -Wno-all-missed-specialisations
+    -Wno-unsafe
+    -Wno-safe
+    -Wno-missing-local-signatures
+    -Wno-monomorphism-restriction
+    -Wno-missing-kind-signatures
+    -Wno-missing-safe-haskell-mode
+    -- We want these warnings, but the code doesn't satisfy them yet:
+    -Wno-missing-deriving-strategies
+    -Wno-unused-packages
+    -Wno-partial-fields
+    -Wno-implicit-prelude
 
 library
   import: common-all
@@ -88,12 +106,14 @@ library
     Hasura.Backends.DataConnector.API.V0.Scalar
     Hasura.Backends.DataConnector.API.V0.Schema
     Hasura.Backends.DataConnector.API.V0.Table
+    Hasura.Backends.DataConnector.API.V0.Dataset
   other-modules:
     Hasura.Backends.DataConnector.API.V0.Name
 
 test-suite tests-dc-api
   import: common-all
   type: exitcode-stdio-1.0
+  build-tool-depends: hspec-discover:hspec-discover
   build-depends:
     Diff,
     aeson,
@@ -134,6 +154,7 @@ test-suite tests-dc-api
     text,
     time,
     unordered-containers,
+    uuid,
     vector,
     xml-conduit,
     xml-lens,
@@ -142,18 +163,20 @@ test-suite tests-dc-api
   hs-source-dirs: test
   -- Turning off optimizations is intentional; tests aren't
   -- performance sensitive and waiting for compilation is a problem.
-  ghc-options: -Wall -O0 -threaded
+  ghc-options: -O0 -threaded
   main-is: Main.hs
   other-modules:
     Command
     Paths_dc_api
+    Test.AgentAPI
     Test.AgentClient
+    Test.AgentDatasets
+    Test.AgentTestContext
     Test.Data
     Test.DataExport
     Test.Expectations
     Test.HttpFile
     Test.Specs.CapabilitiesSpec
-    Test.Specs.ConfigSpec
     Test.Specs.ErrorSpec
     Test.Specs.ExplainSpec
     Test.Specs.HealthSpec
