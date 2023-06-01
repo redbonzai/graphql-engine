@@ -1,5 +1,5 @@
-import type { GlobalWindowHeap } from '@/features/Analytics';
-import { parseSentryDsn } from '@/features/Analytics';
+import type { GlobalWindowHeap } from './features/Analytics';
+import { parseSentryDsn } from './features/Analytics';
 
 /* eslint no-underscore-dangle: 0 */
 import { getFeaturesCompatibility } from './helpers/versionUtils';
@@ -79,6 +79,7 @@ type CloudServerEnv = {
   herokuOAuthClientId: UUID;
   isAdminSecretSet: boolean;
   luxDataHost: string; // e.g. "data.pro.hasura.io"
+  schemaRegistryHost: string;
   projectID: UUID;
   projectName: string;
   serverVersion: string;
@@ -150,6 +151,7 @@ export type EnvVars = {
   cloudRootDomain?: string;
   herokuOAuthClientId?: string;
   luxDataHost?: string;
+  schemaRegistryHost: string;
   isAdminSecretSet?: boolean;
   enableTelemetry?: boolean;
   consoleType?: ConsoleType;
@@ -162,6 +164,7 @@ export type EnvVars = {
   userId?: string;
   cdnAssets?: boolean;
   consoleSentryDsn?: string; // Corresponds to the HASURA_CONSOLE_SENTRY_DSN environment variable
+  launchDarklyClientId?: string;
 } & (
   | OSSServerEnv
   | CloudServerEnv
@@ -183,7 +186,6 @@ declare global {
 /* initialize globals */
 
 const isProduction = window.__env?.nodeEnv !== 'development';
-
 const globals = {
   apiHost: window.__env?.apiHost,
   apiPort: window.__env?.apiPort,
@@ -206,7 +208,6 @@ const globals = {
     : null,
   cliUUID: window.__env?.cliUUID || '',
   hasuraUUID: '',
-  telemetryNotificationShown: false,
   isProduction,
   herokuOAuthClientId: window.__env?.herokuOAuthClientId,
   hasuraCloudTenantId: window.__env?.tenantID,
@@ -219,12 +220,16 @@ const globals = {
     ? stripTrailingSlash(window.__env.luxDataHost)
     : // stripTrailingSlash is used to ensure correctness in Endpoints because we append /v1/graphql to luxDataHost in endpoints.
       undefined,
+  schemaRegistryHost: window.__env?.schemaRegistryHost
+    ? stripTrailingSlash(window.__env.schemaRegistryHost)
+    : '',
   userRole: window.__env?.userRole || undefined,
   userId: window.__env?.userId || undefined,
   consoleType: window.__env?.consoleType // FIXME : this check can be removed when the all CLI environments are set with the console type, some CLI environments could have empty consoleType
     ? parseConsoleType(window.__env?.consoleType)
     : ('' as ConsoleType),
   eeMode: window.__env?.eeMode === 'true',
+  launchDarklyClientId: window.__env?.launchDarklyClientId, // launchDarkly client ID
 };
 if (globals.consoleMode === SERVER_CONSOLE_MODE) {
   if (!window.__env?.dataApiUrl) {

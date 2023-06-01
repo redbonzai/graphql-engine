@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { Dispatch } from '@/types';
-import { useNeonIntegration } from '@/components/Services/Data/DataSources/CreateDataSource/Neon/useNeonIntegration';
-import { transformNeonIntegrationStatusToNeonBannerProps } from '@/components/Services/Data/DataSources/CreateDataSource/Neon/utils';
-import { reactQueryClient } from '@/lib/reactQuery';
-import { Analytics } from '@/features/Analytics';
-import { FETCH_NEON_PROJECTS_BY_PROJECTID_QUERYKEY } from '@/components/Services/Data/DataSources/CreateDataSource/Neon/components/NeonDashboardLink';
+import { Dispatch } from '../../../../../../types';
+import { useNeonIntegration } from '../../../../../../components/Services/Data/DataSources/CreateDataSource/Neon/useNeonIntegration';
+import { transformNeonIntegrationStatusToNeonBannerProps } from '../../../../../../components/Services/Data/DataSources/CreateDataSource/Neon/utils';
+import { reactQueryClient } from '../../../../../../lib/reactQuery';
+import { Analytics } from '../../../../../Analytics';
+import { FETCH_NEON_PROJECTS_BY_PROJECTID_QUERYKEY } from '../../../../../../components/Services/Data/DataSources/CreateDataSource/Neon/components/NeonDashboardLink';
 import _push from '../../../../../../components/Services/Data/push';
 import { NeonBanner } from '../../NeonConnectBanner/NeonBanner';
 import {
@@ -12,8 +12,11 @@ import {
   usePrefetchNeonOnboardingTemplateData,
   useEmitOnboardingEvents,
 } from '../../../hooks';
-import { NEON_TEMPLATE_BASE_PATH } from '../../../constants';
-import { persistSkippedOnboarding } from '../../../utils';
+import {
+  NEON_TEMPLATE_BASE_PATH,
+  skippedNeonOnboardingVariables,
+} from '../../../constants';
+import { emitOnboardingEvent } from '../../../utils';
 
 export function NeonOnboarding(props: {
   dispatch: Dispatch;
@@ -26,7 +29,7 @@ export function NeonOnboarding(props: {
   const { dispatch, dismiss, proceed, setStepperIndex } = props;
 
   const onSkipHandler = () => {
-    persistSkippedOnboarding();
+    emitOnboardingEvent(skippedNeonOnboardingVariables);
     dismiss();
   };
 
@@ -78,10 +81,10 @@ export function NeonOnboarding(props: {
   useEmitOnboardingEvents(neonIntegrationStatus, installingTemplate);
 
   // allow skipping only when an action is not in-progress
-  const allowSkipping =
-    neonIntegrationStatus.status === 'idle' ||
-    neonIntegrationStatus.status === 'authentication-error' ||
-    neonIntegrationStatus.status === 'neon-database-creation-error';
+  const isActionInProgress =
+    neonIntegrationStatus.status !== 'idle' &&
+    neonIntegrationStatus.status !== 'authentication-error' &&
+    neonIntegrationStatus.status !== 'neon-database-creation-error';
 
   const neonBannerProps = transformNeonIntegrationStatusToNeonBannerProps(
     neonIntegrationStatus
@@ -95,17 +98,23 @@ export function NeonOnboarding(props: {
   return (
     <div className="w-full">
       <div className="w-full mb-sm">
-        <NeonBanner {...neonBannerProps} setStepperIndex={setStepperIndex} />
+        <NeonBanner
+          {...neonBannerProps}
+          setStepperIndex={setStepperIndex}
+          dispatch={dispatch}
+          dismiss={dismiss}
+        />
       </div>
       <div className="flex justify-start items-center w-full">
         <Analytics name="onboarding-skip-button">
           <a
+            id="onboarding-skip-button"
             className={`w-auto text-secondary text-sm hover:text-secondary-dark hover:no-underline ${
-              allowSkipping ? 'cursor-pointer' : 'cursor-not-allowed'
+              !isActionInProgress ? 'cursor-pointer' : 'cursor-not-allowed'
             }`}
-            title={!allowSkipping ? 'Please wait...' : undefined}
+            title={isActionInProgress ? 'Operation in progress...' : undefined}
             onClick={() => {
-              if (allowSkipping) {
+              if (!isActionInProgress) {
                 onSkipHandler();
               }
             }}

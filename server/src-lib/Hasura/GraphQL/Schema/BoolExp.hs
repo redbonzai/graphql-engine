@@ -3,7 +3,8 @@
 
 module Hasura.GraphQL.Schema.BoolExp
   ( AggregationPredicatesSchema (..),
-    boolExp,
+    tableBoolExp,
+    logicalModelBoolExp,
     mkBoolOperator,
     equalityOperators,
     comparisonOperators,
@@ -14,11 +15,11 @@ import Data.Has (getter)
 import Data.Text.Casing (GQLNameIdentifier)
 import Data.Text.Casing qualified as C
 import Data.Text.Extended
+import Hasura.Base.Error (throw500)
+import Hasura.Function.Cache
 import Hasura.GraphQL.Parser.Class
 import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.Common
-import Hasura.GraphQL.Schema.NamingCase
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.GraphQL.Schema.Parser
   ( InputFieldsParser,
     Kind (..),
@@ -27,21 +28,26 @@ import Hasura.GraphQL.Schema.Parser
 import Hasura.GraphQL.Schema.Parser qualified as P
 import Hasura.GraphQL.Schema.Table
 import Hasura.GraphQL.Schema.Typename
+import Hasura.LogicalModel.Cache (LogicalModelInfo (..))
+import Hasura.LogicalModel.Common
+import Hasura.LogicalModel.Types (LogicalModelName (..))
 import Hasura.Name qualified as Name
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.IR.Value
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType (BackendType)
 import Hasura.RQL.Types.Column
 import Hasura.RQL.Types.ComputedField
-import Hasura.RQL.Types.Function
+import Hasura.RQL.Types.NamingCase
 import Hasura.RQL.Types.Relationships.Local
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.SchemaCache hiding (askTableInfo)
 import Hasura.RQL.Types.Source
 import Hasura.RQL.Types.SourceCustomization
-import Hasura.RQL.Types.Table
-import Hasura.SQL.Backend (BackendType)
+import Hasura.Table.Cache
 import Language.GraphQL.Draft.Syntax qualified as G
+import Type.Reflection
 
 -- | Backends implement this type class to specify the schema of
 -- aggregation predicates.
@@ -54,7 +60,7 @@ import Language.GraphQL.Draft.Syntax qualified as G
 class AggregationPredicatesSchema (b :: BackendType) where
   aggregationPredicatesParser ::
     forall r m n.
-    MonadBuildSourceSchema b r m n =>
+    (MonadBuildSourceSchema b r m n) =>
     TableInfo b ->
     SchemaT r m (Maybe (InputFieldsParser n [AggregationPredicates b (UnpreparedValue b)]))
 
@@ -75,30 +81,33 @@ instance {-# OVERLAPPABLE #-} (AggregationPredicates b ~ Const Void) => Aggregat
 -- >   column: type_comparison_exp
 -- >   ...
 -- > }
-boolExp ::
-  forall b r m n.
-  (MonadBuildSchema b r m n, AggregationPredicatesSchema b) =>
-  TableInfo b ->
+boolExpInternal ::
+  forall b r m n name.
+  ( Typeable name,
+    Ord name,
+    ToTxt name,
+    MonadBuildSchema b r m n,
+    AggregationPredicatesSchema b
+  ) =>
+  GQLNameIdentifier ->
+  [FieldInfo b] ->
+  G.Description ->
+  name ->
+  SchemaT r m (Maybe (InputFieldsParser n [AggregationPredicates b (UnpreparedValue b)])) ->
   SchemaT r m (Parser 'Input n (AnnBoolExp b (UnpreparedValue b)))
-boolExp tableInfo = do
+boolExpInternal gqlName fieldInfos description memoizeKey mkAggPredParser = do
   sourceInfo :: SourceInfo b <- asks getter
-  P.memoizeOn 'boolExp (_siName sourceInfo, tableName) do
-    tableGQLName <- getTableIdentifierName tableInfo
+  P.memoizeOn 'boolExpInternal (_siName sourceInfo, memoizeKey) do
     let customization = _siCustomization sourceInfo
         tCase = _rscNamingConvention customization
         mkTypename = runMkTypename $ _rscTypeNames customization
-        name = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkTableBoolExpTypeName tableGQLName
-        description =
-          G.Description $
-            "Boolean expression to filter rows from the table "
-              <> tableName
-                <<> ". All fields are combined with a logical 'AND'."
+        name = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkTableBoolExpTypeName gqlName
 
-    fieldInfos <- tableSelectFields tableInfo
     tableFieldParsers <- catMaybes <$> traverse mkField fieldInfos
-    -- TODO: This naming is somewhat unsatifactory..
-    aggregationPredicatesParser' <- fromMaybe (pure []) <$> aggregationPredicatesParser tableInfo
-    recur <- boolExp tableInfo
+
+    aggregationPredicatesParser' <- fromMaybe (pure []) <$> mkAggPredParser
+    recur <- boolExpInternal gqlName fieldInfos description memoizeKey mkAggPredParser
+
     -- Bafflingly, ApplicativeDo doesn’t work if we inline this definition (I
     -- think the TH splices throw it off), so we have to define it separately.
     let connectiveFieldParsers =
@@ -107,15 +116,14 @@ boolExp tableInfo = do
             P.fieldOptional Name.__not Nothing (BoolNot <$> recur)
           ]
 
-    pure $
-      BoolAnd <$> P.object name (Just description) do
+    pure
+      $ BoolAnd
+      <$> P.object name (Just description) do
         tableFields <- map BoolField . catMaybes <$> sequenceA tableFieldParsers
         specialFields <- catMaybes <$> sequenceA connectiveFieldParsers
         aggregationPredicateFields <- map (BoolField . AVAggregationPredicates) <$> aggregationPredicatesParser'
         pure (tableFields ++ specialFields ++ aggregationPredicateFields)
   where
-    tableName = tableInfoName tableInfo
-
     mkField ::
       FieldInfo b ->
       SchemaT r m (Maybe (InputFieldsParser n (Maybe (AnnBoolExpFld b (UnpreparedValue b)))))
@@ -124,37 +132,112 @@ boolExp tableInfo = do
       fieldName <- hoistMaybe $ fieldInfoGraphQLName fieldInfo
       P.fieldOptional fieldName Nothing <$> case fieldInfo of
         -- field_name: field_type_comparison_exp
-        FIColumn columnInfo ->
+        FIColumn (SCIScalarColumn columnInfo) ->
           lift $ fmap (AVColumn columnInfo) <$> comparisonExps @b (ciType columnInfo)
+        FIColumn (SCIObjectColumn _) -> empty -- TODO(dmoverton)
+        FIColumn (SCIArrayColumn _) -> empty -- TODO(dmoverton)
         -- field_name: field_type_bool_exp
         FIRelationship relationshipInfo -> do
-          remoteTableInfo <- askTableInfo $ riRTable relationshipInfo
-          let remoteTableFilter =
-                (fmap . fmap) partialSQLExpToUnpreparedValue $
-                  maybe annBoolExpTrue spiFilter $
-                    tableSelectPermissions roleName remoteTableInfo
-          remoteBoolExp <- lift $ boolExp remoteTableInfo
-          pure $ fmap (AVRelationship relationshipInfo . andAnnBoolExps remoteTableFilter) remoteBoolExp
+          case riTarget relationshipInfo of
+            RelTargetNativeQuery _ -> error "mkField RelTargetNativeQuery"
+            RelTargetTable remoteTable -> do
+              remoteTableInfo <- askTableInfo $ remoteTable
+              let remoteTablePermissions =
+                    (fmap . fmap) (partialSQLExpToUnpreparedValue)
+                      $ maybe annBoolExpTrue spiFilter
+                      $ tableSelectPermissions roleName remoteTableInfo
+              remoteBoolExp <- lift $ tableBoolExp remoteTableInfo
+              pure $ fmap (AVRelationship relationshipInfo . RelationshipFilters remoteTablePermissions) remoteBoolExp
         FIComputedField ComputedFieldInfo {..} -> do
           let ComputedFieldFunction {..} = _cfiFunction
           -- For a computed field to qualify in boolean expression it shouldn't have any input arguments
           case toList _cffInputArgs of
             [] -> do
               let functionArgs =
-                    flip FunctionArgsExp mempty $
-                      fromComputedFieldImplicitArguments @b UVSession _cffComputedFieldImplicitArgs
+                    flip FunctionArgsExp mempty
+                      $ fromComputedFieldImplicitArguments @b UVSession _cffComputedFieldImplicitArgs
 
               fmap (AVComputedField . AnnComputedFieldBoolExp _cfiXComputedFieldInfo _cfiName _cffName functionArgs)
                 <$> case computedFieldReturnType @b _cfiReturnType of
                   ReturnsScalar scalarType -> lift $ fmap CFBEScalar <$> comparisonExps @b (ColumnScalar scalarType)
                   ReturnsTable table -> do
                     info <- askTableInfo table
-                    lift $ fmap (CFBETable table) <$> boolExp info
+                    lift $ fmap (CFBETable table) <$> tableBoolExp info
                   ReturnsOthers -> hoistMaybe Nothing
             _ -> hoistMaybe Nothing
 
         -- Using remote relationship fields in boolean expressions is not supported.
         FIRemoteRelationship _ -> empty
+
+-- |
+-- > input type_bool_exp {
+-- >   _or: [type_bool_exp!]
+-- >   _and: [type_bool_exp!]
+-- >   _not: type_bool_exp
+-- >   column: type_comparison_exp
+-- >   ...
+-- > }
+-- | Boolean expression for logical models
+logicalModelBoolExp ::
+  forall b r m n.
+  ( MonadBuildSchema b r m n,
+    AggregationPredicatesSchema b
+  ) =>
+  LogicalModelInfo b ->
+  SchemaT r m (Parser 'Input n (AnnBoolExp b (UnpreparedValue b)))
+logicalModelBoolExp logicalModel =
+  case toFieldInfo (columnsFromFields $ _lmiFields logicalModel) of
+    Nothing -> throw500 $ "Error creating fields for logical model " <> tshow (_lmiName logicalModel)
+    Just fieldInfo -> do
+      let name = getLogicalModelName (_lmiName logicalModel)
+          gqlName = mkTableBoolExpTypeName (C.fromCustomName name)
+
+          -- Aggregation parsers let us say things like, "select all authors
+          -- with at least one article": they are predicates based on the
+          -- object's relationship with some other entity.
+          --
+          -- Currently, logical models can't be defined to have
+          -- relationships to other entities, and so they don't support
+          -- aggregation predicates.
+          --
+          -- If you're here because you've been asked to implement them, this
+          -- is where you want to put the parser.
+          mkAggPredParser = pure (pure mempty)
+
+          memoizeKey = name
+          description =
+            G.Description
+              $ "Boolean expression to filter rows from the logical model for "
+              <> name
+              <<> ". All fields are combined with a logical 'AND'."
+       in boolExpInternal gqlName fieldInfo description memoizeKey mkAggPredParser
+
+-- |
+-- > input type_bool_exp {
+-- >   _or: [type_bool_exp!]
+-- >   _and: [type_bool_exp!]
+-- >   _not: type_bool_exp
+-- >   column: type_comparison_exp
+-- >   ...
+-- > }
+-- | Booleans expressions for tables
+tableBoolExp ::
+  forall b r m n.
+  (MonadBuildSchema b r m n, AggregationPredicatesSchema b) =>
+  TableInfo b ->
+  SchemaT r m (Parser 'Input n (AnnBoolExp b (UnpreparedValue b)))
+tableBoolExp tableInfo = do
+  gqlName <- getTableIdentifierName tableInfo
+  fieldInfos <- tableSelectFields tableInfo
+  let mkAggPredParser = aggregationPredicatesParser tableInfo
+  let description =
+        G.Description
+          $ "Boolean expression to filter rows from the table "
+          <> tableInfoName tableInfo
+          <<> ". All fields are combined with a logical 'AND'."
+
+  let memoizeKey = tableInfoName tableInfo
+  boolExpInternal gqlName fieldInfos description memoizeKey mkAggPredParser
 
 {- Note [Nullability in comparison operators]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

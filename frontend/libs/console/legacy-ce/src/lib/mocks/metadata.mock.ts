@@ -1,10 +1,11 @@
-import type { ServerConfig } from '@/hooks';
-import type { TMigration } from '@/features/MetadataAPI';
-import type { Metadata } from '@/features/hasura-metadata-types';
+import type { ServerConfig } from '../hooks';
+import type { TMigration } from '../features/MetadataAPI';
+import type { Metadata } from '../features/hasura-metadata-types';
 
-import { allowListInitialData } from '@/features/AllowLists';
-import { queryCollectionInitialData } from '@/features/QueryCollections';
-import { openTelemetryInitialData } from '@/features/OpenTelemetry';
+import { allowListInitialData } from '../features/AllowLists';
+import { queryCollectionInitialData } from '../features/QueryCollections';
+import { openTelemetryInitialData } from '../features/OpenTelemetry';
+import { dataInitialData } from '../features/Data';
 
 import { rest } from 'msw';
 import { metadataReducer } from './actions';
@@ -18,6 +19,7 @@ export const createDefaultInitialData = (): Metadata => ({
     ...allowListInitialData,
     ...queryCollectionInitialData,
     ...openTelemetryInitialData,
+    ...dataInitialData,
   },
 });
 

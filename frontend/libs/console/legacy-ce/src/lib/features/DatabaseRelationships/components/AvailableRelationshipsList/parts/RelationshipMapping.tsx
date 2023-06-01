@@ -1,11 +1,9 @@
-import { Tooltip } from '@/new-components/Tooltip';
-import { getRemoteFieldPath } from '@/features/RelationshipsTable';
+import { getRemoteFieldPath } from '../../../../RelationshipsTable';
 import React from 'react';
 import {
   FaArrowRight,
   FaColumns,
   FaFont,
-  FaExclamationTriangle,
   FaPlug,
   FaTable,
 } from 'react-icons/fa';
@@ -21,16 +19,14 @@ const Columns = ({
 }) => {
   const isMappingPresent = Object.entries(mapping)?.length ?? undefined;
 
-  return isMappingPresent ? (
-    <>
-      {type === 'from'
-        ? Object.keys(mapping).join(',')
-        : Object.values(mapping).join(',')}
-    </>
+  if (!isMappingPresent) {
+    return <></>;
+  }
+
+  return type === 'from' ? (
+    <>{Object.keys(mapping).join(',')}</>
   ) : (
-    <Tooltip tooltipContentChildren="Unable to retrieve any column info. Please check if your datasource is reachable.">
-      <FaExclamationTriangle className="text-red-600" />
-    </Tooltip>
+    <>{Object.values(mapping).join(',')}</>
   );
 };
 
@@ -39,6 +35,15 @@ export const RelationshipMapping = ({
 }: {
   relationship: Relationship;
 }) => {
+  if (relationship.type !== 'remoteSchemaRelationship') {
+    const isMappingPresent =
+      Object.entries(relationship.definition?.mapping)?.length ?? undefined;
+
+    if (!isMappingPresent) {
+      return null;
+    }
+  }
+
   return (
     <div className="flex items-center gap-6">
       <div className="flex items-center gap-2">

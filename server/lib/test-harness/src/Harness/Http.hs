@@ -12,11 +12,14 @@ module Harness.Http
   )
 where
 
+import Conduit (foldMapC, runConduit, (.|))
 import Control.Concurrent.Extended (sleep)
 import Control.Exception
 import Data.Aeson
 import Data.ByteString.Lazy.Char8 qualified as L8
 import Data.String
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import GHC.Stack
 import Hasura.Prelude
 import Network.HTTP.Simple qualified as Http
@@ -27,36 +30,45 @@ import Network.HTTP.Types qualified as Http
 
 -- | Performs get, doesn't return the result. Simply throws if there's
 -- not a 200 response.
-get_ :: HasCallStack => String -> IO ()
-get_ url = do
-  response <- Http.httpNoBody (fromString url)
-  unless (Http.getResponseStatusCode response == 200) $
-    error ("Non-200 response code from HTTP request: " ++ url)
+get_ :: (HasCallStack) => String -> IO ()
+get_ = getWithStatus [200]
 
 -- | Performs get, doesn't return the result. Simply throws if there's
 -- not an expected response status code.
-getWithStatus :: HasCallStack => [Int] -> String -> IO ()
-getWithStatus acceptableStatusCodes url = do
-  response <- Http.httpNoBody (fromString url)
-  unless (Http.getResponseStatusCode response `elem` acceptableStatusCodes) $
-    error ("Unexpected response code from HTTP request: " ++ url ++ ". Expected: " ++ show acceptableStatusCodes)
+getWithStatus :: (HasCallStack) => [Int] -> String -> IO ()
+getWithStatus acceptableStatusCodes url =
+  Http.withResponse @_ @IO (fromString url) \response -> do
+    let actualStatusCode = Http.getResponseStatusCode response
+    unless (actualStatusCode `elem` acceptableStatusCodes) $ do
+      body <- runConduit $ Http.getResponseBody response .| foldMapC id
+      fail
+        $ unlines
+          [ "The HTTP response had an unexpected response code.",
+            "URL: " <> url,
+            "Expected status codes: " <> show acceptableStatusCodes,
+            "Actual status code: " <> show actualStatusCode,
+            "Body:",
+            T.unpack $ T.decodeUtf8 body
+          ]
 
 -- | Post the JSON to the given URL, and produces a very descriptive
 -- exception on failure.
-postValue :: HasCallStack => String -> Http.RequestHeaders -> Value -> IO Value
+postValue :: (HasCallStack) => String -> Http.RequestHeaders -> Value -> IO Value
 postValue = postValueWithStatus 200
 
 post :: String -> Http.RequestHeaders -> Value -> IO (Http.Response L8.ByteString)
 post url headers value = do
   let request =
-        Http.setRequestHeaders headers $
-          Http.setRequestMethod Http.methodPost $
-            Http.setRequestBodyJSON value (fromString url)
-  Http.httpLbs request
+        Http.setRequestHeaders headers
+          $ Http.setRequestMethod Http.methodPost
+          $ Http.setRequestBodyJSON value (fromString url)
+  response <- Http.httpLbs request
+  unless ("Content-Type" `elem` (fst <$> Http.getResponseHeaders response)) $ error "Missing Content-Type header in response"
+  pure response
 
 -- | Post the JSON to the given URL and expected HTTP response code.
 -- Produces a very descriptive exception or failure.
-postValueWithStatus :: HasCallStack => Int -> String -> Http.RequestHeaders -> Value -> IO Value
+postValueWithStatus :: (HasCallStack) => Int -> String -> Http.RequestHeaders -> Value -> IO Value
 postValueWithStatus statusCode url headers value = do
   response <- post url headers value
   let requestBodyString = L8.unpack $ encode value
@@ -92,23 +104,23 @@ postValueWithStatus statusCode url headers value = do
     reportError = error . unlines
 
 -- | Wait for a service to become healthy.
-healthCheck :: HasCallStack => String -> IO ()
+healthCheck :: (HasCallStack) => String -> IO ()
 healthCheck url = do
   result <- healthCheck' url
   case result of
     Healthy -> return ()
     Unhealthy failures ->
       error
-        ( "Health check failed for URL: "
-            ++ url
-            ++ ", with failures: "
-            ++ show failures
-        )
+        $ "Health check failed for URL: "
+        ++ url
+        ++ ", with failures: "
+        ++ show failures
+        ++ "\nIs graphql-engine starting up without errors outside of this test suite?"
 
 data HealthCheckResult = Healthy | Unhealthy [Http.HttpException]
 
 -- | Wait for a service to become healthy.
-healthCheck' :: HasCallStack => String -> IO HealthCheckResult
+healthCheck' :: (HasCallStack) => String -> IO HealthCheckResult
 healthCheck' url = loop [] httpHealthCheckAttempts
   where
     loop failures 0 = return $ Unhealthy failures
@@ -123,7 +135,7 @@ healthCheck' url = loop [] httpHealthCheckAttempts
 -- * HTTP health checks
 
 httpHealthCheckAttempts :: Int
-httpHealthCheckAttempts = 5
+httpHealthCheckAttempts = 15
 
 httpHealthCheckIntervalSeconds :: DiffTime
 httpHealthCheckIntervalSeconds = 1

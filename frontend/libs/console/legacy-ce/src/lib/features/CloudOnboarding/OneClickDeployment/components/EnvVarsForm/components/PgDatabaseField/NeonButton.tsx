@@ -1,9 +1,10 @@
 import React from 'react';
 import { MdRefresh } from 'react-icons/md';
+import { Analytics } from '../../../../../../Analytics';
 import { FaExclamationCircle, FaPlusCircle, FaSpinner } from 'react-icons/fa';
 import { useFormContext } from 'react-hook-form';
-import { ErrorComponentTemplate } from '@/new-components/Form';
-import { Button } from '@/new-components/Button';
+import { ErrorComponentTemplate } from '../../../../../../../new-components/Form';
+import { Button } from '../../../../../../../new-components/Button';
 import { NeonButtonIcons, NeonButtonProps } from '../../types';
 import { RequiredEnvVar } from '../../../../types';
 
@@ -22,7 +23,7 @@ export function NeonButton(props: Props) {
   const { dbEnvVar, neonButtonProps } = props;
   const { formState } = useFormContext();
 
-  let errorMessage: string | undefined;
+  let errorMessage: string | undefined | React.ReactNode;
 
   if (formState.errors?.[dbEnvVar.Name]) {
     errorMessage = formState.errors?.[dbEnvVar.Name].message;
@@ -34,20 +35,25 @@ export function NeonButton(props: Props) {
   return (
     <>
       <div className="flex items-center">
-        <Button
-          onClick={neonButtonProps.onClickConnect}
-          icon={
-            neonButtonProps.icon
-              ? neonButtonIconMap[neonButtonProps.icon]
-              : undefined
-          }
-          size="md"
-          disabled={neonButtonProps.status.status === 'loading'}
+        <Analytics
+          name="one-click-deployment-neon-button"
+          passHtmlAttributesToChildren
         >
-          <span className="text-lg font-bold text-slate-900">
-            {neonButtonProps.buttonText}
-          </span>
-        </Button>
+          <Button
+            onClick={neonButtonProps.onClickConnect}
+            icon={
+              neonButtonProps.icon
+                ? neonButtonIconMap[neonButtonProps.icon]
+                : undefined
+            }
+            size="md"
+            disabled={neonButtonProps.status.status === 'loading'}
+          >
+            <span className="text-lg font-bold text-slate-900">
+              {neonButtonProps.buttonText}
+            </span>
+          </Button>
+        </Analytics>
       </div>
 
       {errorMessage ? (
@@ -58,7 +64,7 @@ export function NeonButton(props: Props) {
               {errorMessage}
             </>
           }
-          ariaLabel={errorMessage ?? ''}
+          ariaLabel={errorMessage ? 'Neon Database creation failed' : ''}
           role="alert"
         />
       ) : (

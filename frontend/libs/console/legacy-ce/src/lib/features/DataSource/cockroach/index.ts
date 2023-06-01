@@ -1,30 +1,50 @@
-import { Table } from '@/features/hasura-metadata-types';
+import { Table } from '../../hasura-metadata-types';
 import { Database, Feature } from '..';
 import { runSQL } from '../api';
-import { defaultDatabaseProps } from '../common/defaultDatabaseProps';
+import {
+  defaultDatabaseProps,
+  defaultIntrospectionProps,
+} from '../common/defaultDatabaseProps';
 import { adaptIntrospectedTables } from '../common/utils';
-import { GetTrackableTablesProps } from '../types';
+import { GetTrackableTablesProps, GetVersionProps } from '../types';
 import {
   getTableColumns,
   getFKRelationships,
   getTablesListAsTree,
   getSupportedOperators,
+  getIsTableView,
 } from './introspection';
 import { getTableRows } from './query';
+import { postgresCapabilities } from '../common/capabilities';
+import { consoleDataTypeToSQLTypeMap } from './utils';
 
 export type CockroachDBTable = { name: string; schema: string };
 
 export const cockroach: Database = {
   ...defaultDatabaseProps,
   introspection: {
+    ...defaultIntrospectionProps,
+    getVersion: async ({ dataSourceName, httpClient }: GetVersionProps) => {
+      const result = await runSQL({
+        source: {
+          name: dataSourceName,
+          kind: 'cockroach',
+        },
+        sql: `SELECT VERSION()`,
+        httpClient,
+      });
+      console.log(result);
+      return result.result?.[1][0] ?? '';
+    },
     getDriverInfo: async () => ({
       name: 'cockroach',
       displayName: 'CockroachDB',
-      release: 'Beta',
+      release: 'GA',
     }),
     getDatabaseConfiguration: async () => {
       return Feature.NotImplemented;
     },
+    getDriverCapabilities: async () => Promise.resolve(postgresCapabilities),
     getTrackableTables: async ({
       dataSourceName,
       httpClient,
@@ -39,9 +59,9 @@ export const cockroach: Database = {
           JOIN pg_namespace nmsp_child    ON nmsp_child.oid   = child.relnamespace
         ) as names
       )
-      SELECT info_schema.table_name, info_schema.table_schema, info_schema.table_type 
+      SELECT info_schema.table_name, info_schema.table_schema, info_schema.table_type
       FROM information_schema.tables as info_schema, partitions
-      WHERE 
+      WHERE
         info_schema.table_schema NOT IN ('pg_catalog', 'crdb_internal', 'information_schema', 'columnar', 'guest', 'INFORMATION_SCHEMA', 'sys', 'db_owner', 'db_securityadmin', 'db_accessadmin', 'db_backupoperator', 'db_ddladmin', 'db_datawriter', 'db_datareader', 'db_denydatawriter', 'db_denydatareader', 'hdb_catalog', '_timescaledb_internal', 'pg_extension')
         AND NOT (info_schema.table_name = ANY (partitions.names));
       `;
@@ -63,6 +83,9 @@ export const cockroach: Database = {
     getFKRelationships,
     getTablesListAsTree,
     getSupportedOperators,
+    getDatabaseSchemas: async () => Feature.NotImplemented,
+    getIsTableView,
+    getSupportedDataTypes: async () => consoleDataTypeToSQLTypeMap,
   },
   query: {
     getTableRows,
@@ -71,6 +94,9 @@ export const cockroach: Database = {
     getDefaultQueryRoot: async (table: Table) => {
       const { name, schema } = table as CockroachDBTable;
       return schema === 'public' ? name : `${schema}_${name}`;
+    },
+    getSupportedQueryTypes: async () => {
+      return ['select', 'insert', 'update', 'delete'];
     },
   },
 };

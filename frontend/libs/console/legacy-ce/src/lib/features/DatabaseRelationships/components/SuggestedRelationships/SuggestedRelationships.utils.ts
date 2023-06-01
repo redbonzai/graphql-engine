@@ -1,4 +1,4 @@
-import { capitaliseFirstLetter } from '@/components/Common/ConfigureTransformation/utils';
+import { capitaliseFirstLetter } from '../../../../components/Common/ConfigureTransformation/utils';
 import { LocalRelationship } from '../../types';
 import { SuggestedRelationshipWithName } from './hooks/useSuggestedRelationships';
 
@@ -8,8 +8,8 @@ export const convertSuggestedRelationShipToLocalRelationship = (
 ): LocalRelationship => ({
   definition: {
     toTable: suggestedRelationship.to.table,
-    mapping: suggestedRelationship.to.columns.reduce((acc, column) => {
-      return { ...acc, [column]: column };
+    mapping: suggestedRelationship.to.columns.reduce((acc, column, index) => {
+      return { ...acc, [suggestedRelationship.from.columns[index]]: column };
     }, {}),
   },
   fromSource: dataSourceName,

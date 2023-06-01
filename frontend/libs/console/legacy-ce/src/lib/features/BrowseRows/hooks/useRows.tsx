@@ -1,7 +1,7 @@
-import { DEFAULT_STALE_TIME } from '@/features/DatabaseRelationships';
-import { DataSource, OrderBy, WhereClause } from '@/features/DataSource';
-import { Table } from '@/features/hasura-metadata-types';
-import { useHttpClient } from '@/features/Network';
+import { DEFAULT_STALE_TIME } from '../../DatabaseRelationships';
+import { DataSource, OrderBy, WhereClause } from '../../DataSource';
+import { Table } from '../../hasura-metadata-types';
+import { useHttpClient } from '../../Network';
 import { AxiosInstance } from 'axios';
 import { useQuery } from 'react-query';
 
@@ -47,6 +47,21 @@ export type UseRowsPropType = {
   };
 };
 
+export function getBrowseRowsQueryKey({
+  dataSourceName,
+  table,
+  columns,
+  options,
+}: UseRowsPropType) {
+  return [
+    'browse-rows',
+    dataSourceName,
+    table,
+    columns,
+    JSON.stringify(options),
+  ];
+}
+
 export const useRows = ({
   dataSourceName,
   table,
@@ -54,14 +69,15 @@ export const useRows = ({
   options,
 }: UseRowsPropType) => {
   const httpClient = useHttpClient();
+  const queryKey = getBrowseRowsQueryKey({
+    dataSourceName,
+    table,
+    columns,
+    options,
+  });
+
   return useQuery({
-    queryKey: [
-      'browse-rows',
-      dataSourceName,
-      table,
-      columns,
-      JSON.stringify(options),
-    ],
+    queryKey,
     queryFn: async () => {
       try {
         return await fetchRows({

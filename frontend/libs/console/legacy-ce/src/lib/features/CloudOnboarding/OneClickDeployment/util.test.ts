@@ -1,4 +1,8 @@
-import { transformStatelogToCLILog, getCliProgressState } from './util';
+import {
+  transformStatelogToCLILog,
+  getCliProgressState,
+  getSampleQueriesUrl,
+} from './util';
 import {
   OneClickDeploymentState,
   OneClickDeploymentStateTransition,
@@ -72,6 +76,7 @@ const tc: {
       [OneClickDeploymentState.ReadingEnvironmentVariables]: {
         kind: 'error',
         error: { message: 'unexpected' },
+        logId: 2,
       },
       [OneClickDeploymentState.AwaitingEnvironmentVariables]: { kind: 'idle' },
       [OneClickDeploymentState.SufficientEnvironmentVariables]: {
@@ -154,6 +159,7 @@ const tc: {
       [OneClickDeploymentState.ApplyingMetadataMigrationsSeeds]: {
         kind: 'error',
         error: { message: 'unable to connect' },
+        logId: 2,
       },
       [OneClickDeploymentState.Completed]: { kind: 'idle' },
     },
@@ -648,5 +654,29 @@ describe('getCliProgressState', () => {
     testFunc(name, () => {
       expect(getCliProgressState(input)).toEqual(output);
     });
+  });
+});
+
+describe('getSampleQueryUrl', () => {
+  it('constructs query url correctly from git repo details', () => {
+    expect(
+      getSampleQueriesUrl({
+        url: 'https://github.com/hasura/lux',
+        branch: '2080-add-tests',
+        hasuraDirectory: 'services',
+      })
+    ).toEqual(
+      'https://raw.githubusercontent.com/hasura/lux/2080-add-tests/services/sample-requests.graphql'
+    );
+  });
+
+  it('returns empty string for a non-url', () => {
+    expect(
+      getSampleQueriesUrl({
+        url: 'non-url',
+        branch: 'branch',
+        hasuraDirectory: 'services',
+      })
+    ).toEqual('');
   });
 });

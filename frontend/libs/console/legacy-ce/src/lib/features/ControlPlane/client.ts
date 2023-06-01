@@ -1,14 +1,14 @@
-import endpoints from '@/Endpoints';
-import globals from '@/Globals';
-import { isCloudConsole } from '@/utils/cloudConsole';
-import { Api } from '@/hooks/apiUtils';
-import { getGraphqlSubscriptionsClient } from '@/utils/graphqlSubscriptions';
+import endpoints from '../../Endpoints';
+import globals from '../../Globals';
+import { isCloudConsole } from '../../utils/cloudConsole';
+import { Api } from '../../hooks/apiUtils';
+import { getGraphqlSubscriptionsClient } from '../../utils/graphqlSubscriptions';
 import { print, DocumentNode } from 'graphql/language';
 import { GraphQLError } from 'graphql/error';
 
 export const createControlPlaneClient = (
   endpoint: string = endpoints.luxDataGraphql,
-  headers = {
+  headers: Record<string, string> = {
     'content-type': 'application/json',
     'hasura-client-name': 'hasura-console',
   }
@@ -37,7 +37,7 @@ export const createControlPlaneClient = (
 
   const subscribe = <
     ResponseType = Record<string, any>,
-    VariablesType = Record<string, any>
+    VariablesType extends Object = Record<string, any>
   >(
     queryDoc: DocumentNode,
     variables: VariablesType,

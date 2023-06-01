@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | API related to server configuration
@@ -11,14 +12,24 @@ where
 import Data.Aeson.TH
 import Data.HashSet qualified as Set
 import Hasura.GraphQL.Execute.Subscription.Options qualified as ES
-import Hasura.GraphQL.Schema.NamingCase
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Prelude
+import Hasura.RQL.Types.NamingCase
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.Server.Auth
 import Hasura.Server.Auth.JWT
-import Hasura.Server.Init.Config (API (METRICS))
+import Hasura.Server.Init.Config (API (METRICS), AllowListStatus)
+import Hasura.Server.Init.FeatureFlag (FeatureFlag (..), getIdentifier)
 import Hasura.Server.Types (ExperimentalFeature)
 import Hasura.Server.Version (Version, currentVersion)
+
+data FeatureFlagInfo = FeatureFlagInfo
+  { ffiName :: Text,
+    ffiDescription :: Text,
+    ffiEnabled :: Bool
+  }
+  deriving (Show, Eq, Generic, Hashable)
+
+$(deriveToJSON hasuraJSON ''FeatureFlagInfo)
 
 data JWTInfo = JWTInfo
   { jwtiClaimsNamespace :: !JWTNamespace,
@@ -37,13 +48,14 @@ data ServerConfig = ServerConfig
     scfgIsAuthHookSet :: !Bool,
     scfgIsJwtSet :: !Bool,
     scfgJwt :: ![JWTInfo],
-    scfgIsAllowListEnabled :: !Bool,
+    scfgIsAllowListEnabled :: !AllowListStatus,
     scfgLiveQueries :: !ES.LiveQueriesOptions,
     scfgStreamingQueries :: !ES.SubscriptionsOptions,
     scfgConsoleAssetsDir :: !(Maybe Text),
     scfgExperimentalFeatures :: !(Set.HashSet ExperimentalFeature),
     scfgIsPrometheusMetricsEnabled :: !Bool,
-    scfgDefaultNamingConvention :: !NamingCase
+    scfgDefaultNamingConvention :: !NamingCase,
+    scfgFeatureFlags :: !(Set.HashSet FeatureFlagInfo)
   }
   deriving (Show, Eq)
 
@@ -53,25 +65,27 @@ runGetConfig ::
   Options.InferFunctionPermissions ->
   Options.RemoteSchemaPermissions ->
   AuthMode ->
-  Bool ->
+  AllowListStatus ->
   ES.LiveQueriesOptions ->
   ES.SubscriptionsOptions ->
   Maybe Text ->
   Set.HashSet ExperimentalFeature ->
   Set.HashSet API ->
   NamingCase ->
+  [(FeatureFlag, Bool)] ->
   ServerConfig
 runGetConfig
   functionPermsCtx
   remoteSchemaPermsCtx
   am
-  isAllowListEnabled
+  allowListStatus
   liveQueryOpts
   streamQueryOpts
   consoleAssetsDir
   experimentalFeatures
   enabledAPIs
-  defaultNamingConvention =
+  defaultNamingConvention
+  featureFlags =
     ServerConfig
       currentVersion
       functionPermsCtx
@@ -80,15 +94,20 @@ runGetConfig
       (isAuthHookSet am)
       (isJWTSet am)
       (getJWTInfo am)
-      isAllowListEnabled
+      allowListStatus
       liveQueryOpts
       streamQueryOpts
       consoleAssetsDir
       experimentalFeatures
       isPrometheusMetricsEnabled
       defaultNamingConvention
+      featureFlagSettings
     where
       isPrometheusMetricsEnabled = METRICS `Set.member` enabledAPIs
+      featureFlagSettings =
+        Set.fromList
+          $ (\(FeatureFlag {ffDescription, ffIdentifier}, enabled) -> FeatureFlagInfo {ffiName = getIdentifier ffIdentifier, ffiEnabled = enabled, ffiDescription = ffDescription})
+          <$> featureFlags
 
 isAdminSecretSet :: AuthMode -> Bool
 isAdminSecretSet = \case

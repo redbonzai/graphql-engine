@@ -1,14 +1,17 @@
 import React from 'react';
 import { useFormContext, useFieldArray } from 'react-hook-form';
 
-import { Button } from '@/new-components/Button';
-import { Collapse } from '@/new-components/deprecated';
+import { Button } from '../../../../new-components/Button';
+import { Collapse } from '../../../../new-components/deprecated';
 import { useIsDisabled } from '../hooks/useIsDisabled';
 import { QueryType } from '../../types';
-
+import { Permission } from '../../schema';
+import { Feature } from '../../../DataSource';
+import { getTableDisplayName } from '../../../DatabaseRelationships';
+import { QualifiedTable } from '../../../../metadata/types';
 interface ClonePermissionsRowProps {
   id: number;
-  tables: string[];
+  tables: QualifiedTable[];
   currentQueryType: QueryType;
   queryTypes: string[];
   roleNames: string[];
@@ -29,7 +32,7 @@ export const ClonePermissionsRow: React.FC<ClonePermissionsRowProps> = ({
   const { register, watch } = useFormContext();
 
   const formKey = 'clonePermissions';
-  const watched: ClonePermission = watch(`${formKey}.${id}`);
+  const watched: Permission = watch(`${formKey}.${id}`);
 
   const allDisabled = useIsDisabled(currentQueryType as QueryType);
 
@@ -38,7 +41,6 @@ export const ClonePermissionsRow: React.FC<ClonePermissionsRowProps> = ({
       <div>
         <select
           className={className}
-          disabled={allDisabled}
           title={allDisabled ? 'Set a row permission first' : ''}
           {...register(`${formKey}.${id}.tableName`)}
         >
@@ -46,18 +48,20 @@ export const ClonePermissionsRow: React.FC<ClonePermissionsRowProps> = ({
             Table Name
           </option>
 
-          {tables?.map(tableName => (
-            <option key={tableName} value={tableName}>
-              {tableName}
-            </option>
-          ))}
+          {tables?.map(table => {
+            const tableName = getTableDisplayName(table);
+            return (
+              <option key={tableName} value={tableName}>
+                {tableName}
+              </option>
+            );
+          })}
         </select>
       </div>
 
       <div>
         <select
           className={className}
-          disabled={allDisabled}
           title={allDisabled ? 'Set a row permission first' : ''}
           {...register(`${formKey}.${id}.queryType`)}
         >
@@ -76,7 +80,6 @@ export const ClonePermissionsRow: React.FC<ClonePermissionsRowProps> = ({
       <div>
         <select
           className={className}
-          disabled={allDisabled}
           title={allDisabled ? 'Set a row permission first' : ''}
           {...register(`${formKey}.${id}.roleName`)}
         >
@@ -91,9 +94,9 @@ export const ClonePermissionsRow: React.FC<ClonePermissionsRowProps> = ({
           ))}
         </select>
       </div>
-      {watched.tableName !== '' &&
-        watched.queryType !== '' &&
-        watched.roleName !== '' && (
+      {watched?.tableName !== '' &&
+        watched?.queryType !== '' &&
+        watched?.roleName !== '' && (
           <div className="flex items-center">
             <Button type="button" size="sm" mode="destructive" onClick={remove}>
               Delete
@@ -105,18 +108,11 @@ export const ClonePermissionsRow: React.FC<ClonePermissionsRowProps> = ({
 };
 
 export interface ClonePermissionsSectionProps {
-  queryType: any;
-  tables: string[];
-  supportedQueryTypes: string[];
+  queryType: string;
+  tables: QualifiedTable[];
+  supportedQueryTypes: QueryType[] | Feature | undefined;
   roles: string[];
   defaultOpen?: boolean;
-}
-
-export interface ClonePermission {
-  id: number;
-  tableName: string;
-  queryType: any;
-  roleName: string;
 }
 
 export const ClonePermissionsSection: React.FC<
@@ -131,7 +127,7 @@ export const ClonePermissionsSection: React.FC<
     name: 'clonePermissions',
   });
 
-  const watched: ClonePermission[] = watch('clonePermissions');
+  const watched: Permission[] = watch('clonePermissions');
   const controlledFields = fields.map((field, index) => {
     return {
       ...field,
@@ -152,9 +148,14 @@ export const ClonePermissionsSection: React.FC<
         tableName: '',
         queryType: '',
         roleName: '',
-      } as ClonePermission);
+      } as Permission);
     }
   }, [controlledFields, append]);
+  const queryTypes =
+    supportedQueryTypes === Feature.NotImplemented ||
+    supportedQueryTypes === undefined
+      ? []
+      : supportedQueryTypes;
 
   return (
     <Collapse defaultOpen={defaultOpen}>
@@ -176,7 +177,7 @@ export const ClonePermissionsSection: React.FC<
                 id={index}
                 tables={tables}
                 currentQueryType={queryType as QueryType}
-                queryTypes={supportedQueryTypes}
+                queryTypes={queryTypes}
                 roleNames={roles}
                 remove={() => remove(index)}
               />

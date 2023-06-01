@@ -1,10 +1,11 @@
 import React from 'react';
-import { useAppDispatch } from '@/store';
-import { HasuraFamiliaritySurvey } from '@/features/Surveys';
+import { useAppDispatch } from '../../../storeHooks';
+import { AllowedSurveyThemes, Survey } from '../../Surveys';
 import {
   ConnectDBScreen,
   TemplateSummary,
   DialogContainer,
+  UseCaseScreen,
 } from './components';
 
 import { useWizardState } from './hooks';
@@ -28,7 +29,6 @@ export function Root() {
     setState,
     familiaritySurveyData,
     familiaritySurveyOnOptionClick,
-    familiaritySurveyOnSkip,
   } = useWizardState();
 
   const transitionToTemplateSummary = () => {
@@ -46,10 +46,10 @@ export function Root() {
           header={dialogHeader}
           subHeader={familiaritySurveySubHeader}
         >
-          <HasuraFamiliaritySurvey
+          <Survey
+            theme={AllowedSurveyThemes.familiaritySurveyTheme}
+            onSubmit={familiaritySurveyOnOptionClick}
             data={familiaritySurveyData}
-            onSkip={familiaritySurveyOnSkip}
-            onOptionClick={familiaritySurveyOnOptionClick}
           />
         </DialogContainer>
       );
@@ -87,6 +87,12 @@ export function Root() {
         </DialogContainer>
       );
     }
+    case 'use-case-onboarding':
+      return (
+        <DialogContainer header="">
+          <UseCaseScreen dismiss={dismiss} dispatch={dispatch} />
+        </DialogContainer>
+      );
     case 'hidden':
     default: {
       return null;

@@ -31,11 +31,12 @@ import Data.Text qualified as Text
 import Database.PG.Query qualified as Query
 import Hasura.Backends.Postgres.Connection qualified as Connection
 import Hasura.Base.Error qualified as Error
+import Hasura.GraphQL.ApolloFederation (getApolloFederationStatus)
 import Hasura.GraphQL.Execute.Subscription.Options qualified as Subscription.Options
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Logging qualified as Logging
 import Hasura.Prelude
 import Hasura.RQL.Types.Common qualified as Common
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.Server.Auth qualified as Auth
 import Hasura.Server.Cors qualified as Cors
 import Hasura.Server.Init.Arg
@@ -76,7 +77,9 @@ Following is the precise behaviour -
 -- TODO: Move into a dedicated Metadata module (ala Pro).
 getDbId :: Query.TxE Error.QErr Types.MetadataDbId
 getDbId =
-  Types.MetadataDbId . runIdentity . Query.getRow
+  Types.MetadataDbId
+    . runIdentity
+    . Query.getRow
     <$> Query.withQE
       Connection.defaultTxErrorHandler
       [Query.sql|
@@ -95,7 +98,7 @@ getPgVersion = Types.PGVersion <$> Query.serverVersion
 -- command parser, then process the subcommand raw values if
 -- necessary.
 mkHGEOptions ::
-  Logging.EnabledLogTypes impl => HGEOptionsRaw (ServeOptionsRaw impl) -> WithEnv (HGEOptions (ServeOptions impl))
+  (Logging.EnabledLogTypes impl) => HGEOptionsRaw (ServeOptionsRaw impl) -> WithEnv (HGEOptions (ServeOptions impl))
 mkHGEOptions (HGEOptionsRaw rawDbUrl rawMetadataDbUrl rawCmd) = do
   dbUrl <- processPostgresConnInfo rawDbUrl
   metadataDbUrl <- withOption rawMetadataDbUrl metadataDbUrlOption
@@ -146,8 +149,8 @@ rawConnInfoToUrlConf maybeRawConnInfo = do
 
 -- | Merge the results of the serve subcommmand arg parser with
 -- corresponding values from the 'WithEnv' context.
-mkServeOptions :: forall impl. Logging.EnabledLogTypes impl => ServeOptionsRaw impl -> WithEnv (ServeOptions impl)
-mkServeOptions ServeOptionsRaw {..} = do
+mkServeOptions :: forall impl. (Logging.EnabledLogTypes impl) => ServeOptionsRaw impl -> WithEnv (ServeOptions impl)
+mkServeOptions sor@ServeOptionsRaw {..} = do
   soPort <- withOptionDefault rsoPort servePortOption
   soHost <- withOptionDefault rsoHost serveHostOption
   soConnParams <- mkConnParams rsoConnParams
@@ -156,8 +159,8 @@ mkServeOptions ServeOptionsRaw {..} = do
   soAuthHook <- mkAuthHook rsoAuthHook
   soJwtSecret <- maybeToList <$> withOption rsoJwtSecret jwtSecretOption
   soUnAuthRole <- withOption rsoUnAuthRole unAuthRoleOption
-  soCorsConfig <- mkCorsConfig rsoCorsConfig
-  soEnableConsole <- withOptionSwitch rsoEnableConsole enableConsoleOption
+  soCorsConfig <- mkCorsConfig sor rsoCorsConfig
+  soConsoleStatus <- withOptionSwitch' rsoConsoleStatus (isConsoleEnabled, bool ConsoleDisabled ConsoleEnabled) enableConsoleOption
   soConsoleAssetsDir <- withOption rsoConsoleAssetsDir consoleAssetsDirOption
   soConsoleSentryDsn <- withOption rsoConsoleSentryDsn consoleSentryDsnOption
   soEnableTelemetry <- withOptionDefault rsoEnableTelemetry enableTelemetryOption
@@ -175,11 +178,11 @@ mkServeOptions ServeOptionsRaw {..} = do
     _lqoRefetchInterval <- withOptionDefault rsoStreamingMxRefetchInt streamingMxRefetchDelayOption
     _lqoBatchSize <- withOptionDefault rsoStreamingMxBatchSize streamingMxBatchSizeOption
     pure $ Subscription.Options.SubscriptionsOptions {..}
-  soEnableAllowlist <- withOptionSwitch rsoEnableAllowlist enableAllowlistOption
+  soEnableAllowList <- withOptionSwitch' rsoEnableAllowList (isAllowListEnabled, bool AllowListDisabled AllowListEnabled) enableAllowlistOption
   soEnabledLogTypes <- withOptionDefault rsoEnabledLogTypes (enabledLogsOption @impl)
   soLogLevel <- withOptionDefault rsoLogLevel logLevelOption
-  soDevMode <- withOptionSwitch rsoDevMode graphqlDevModeOption
-  soResponseInternalErrorsConfig <- mkResponseInternalErrorsConfig soDevMode
+  soDevMode <- withOptionSwitch' rsoDevMode (isDevModeEnabled, bool DevModeDisabled DevModeEnabled) graphqlDevModeOption
+  soAdminInternalErrors <- withOptionDefault rsoAdminInternalErrors graphqlAdminInternalErrorsOption
   soEventsHttpPoolSize <- withOptionDefault rsoEventsHttpPoolSize graphqlEventsHttpPoolSizeOption
   soEventsFetchInterval <- withOptionDefault rsoEventsFetchInterval graphqlEventsFetchIntervalOption
   soAsyncActionsFetchInterval <- withOptionDefault rsoAsyncActionsFetchInterval asyncActionsFetchIntervalOption
@@ -187,7 +190,9 @@ mkServeOptions ServeOptionsRaw {..} = do
     case rsoEnableRemoteSchemaPermissions of
       Options.DisableRemoteSchemaPermissions -> withOptionDefault Nothing enableRemoteSchemaPermsOption
       enableRemoteSchemaPermissions -> pure enableRemoteSchemaPermissions
-  soConnectionOptions <- mkConnectionOptions
+  webSocketCompressionFromEnv <-
+    withOptionSwitch' rsoWebSocketCompression (isWebSocketCompressionEnabled, bool WebSockets.NoCompression (WebSockets.PermessageDeflateCompression WebSockets.defaultPermessageDeflate)) webSocketCompressionOption
+  let soConnectionOptions = WebSockets.defaultConnectionOptions {WebSockets.connectionCompressionOptions = webSocketCompressionFromEnv}
   soWebSocketKeepAlive <- withOptionDefault rsoWebSocketKeepAlive webSocketKeepAliveOption
   soInferFunctionPermissions <- withOptionDefault rsoInferFunctionPermissions inferFunctionPermsOption
   soEnableMaintenanceMode <- case rsoEnableMaintenanceMode of
@@ -206,76 +211,80 @@ mkServeOptions ServeOptionsRaw {..} = do
   soDefaultNamingConvention <- withOptionDefault rsoDefaultNamingConvention defaultNamingConventionOption
   soMetadataDefaults <- withOptionDefault rsoMetadataDefaults metadataDefaultsOption
   soExtensionsSchema <- withOptionDefault rsoExtensionsSchema metadataDBExtensionsSchemaOption
-
+  soApolloFederationStatus <- do
+    apolloFederationStatusOptionM <- withOptionDefault (pure <$> rsoApolloFederationStatus) apolloFederationStatusOption
+    pure $ getApolloFederationStatus soExperimentalFeatures apolloFederationStatusOptionM
   pure ServeOptions {..}
-  where
-    mkConnParams ConnParamsRaw {..} = do
-      cpStripes <- unrefine <$> withOptionDefault rcpStripes pgStripesOption
-      -- Note: by Little's Law we can expect e.g. (with 50 max connections) a
-      -- hard throughput cap at 1000RPS when db queries take 50ms on average:
-      cpConns <- unrefine <$> withOptionDefault rcpConns pgConnsOption
-      cpIdleTime <- unrefine <$> withOptionDefault rcpIdleTime pgTimeoutOption
-      cpAllowPrepare <- withOptionDefault rcpAllowPrepare pgUsePreparedStatementsOption
-      -- TODO: Add newtype to allow this:
-      cpMbLifetime <- do
-        lifetime <- unrefine <$> withOptionDefault rcpConnLifetime pgConnLifetimeOption
-        if lifetime == 0
-          then pure Nothing
-          else pure (Just lifetime)
-      cpTimeout <- fmap unrefine <$> withOption rcpPoolTimeout pgPoolTimeoutOption
-      let cpCancel = True
-      return $
-        Query.ConnParams {..}
 
-    mkAuthHook (AuthHookRaw mUrl mType) = do
-      mUrlEnv <- withOption mUrl authHookOption
-      -- Also support HASURA_GRAPHQL_AUTH_HOOK_TYPE
-      -- TODO (from master):- drop this in next major update <--- (NOTE: This comment is from 2020-08-21)
-      authMode <-
+-- | Fetch Postgres 'Query.ConnParams' components from the environment
+-- and merge with the values consumed by the arg parser in
+-- 'ConnParamsRaw'.
+mkConnParams :: (Monad m) => ConnParamsRaw -> WithEnvT m Query.ConnParams
+mkConnParams ConnParamsRaw {..} = do
+  cpStripes <- unrefine <$> withOptionDefault rcpStripes pgStripesOption
+  -- Note: by Little's Law we can expect e.g. (with 50 max connections) a
+  -- hard throughput cap at 1000RPS when db queries take 50ms on average:
+  cpConns <- unrefine <$> withOptionDefault rcpConns pgConnsOption
+  cpIdleTime <- unrefine <$> withOptionDefault rcpIdleTime pgTimeoutOption
+  cpAllowPrepare <- withOptionDefault rcpAllowPrepare pgUsePreparedStatementsOption
+  -- TODO: Add newtype to allow this:
+  cpMbLifetime <- do
+    lifetime <- unrefine <$> withOptionDefault rcpConnLifetime pgConnLifetimeOption
+    if lifetime == 0
+      then pure Nothing
+      else pure (Just lifetime)
+  cpTimeout <- fmap unrefine <$> withOption rcpPoolTimeout pgPoolTimeoutOption
+  let cpCancel = True
+  return
+    $ Query.ConnParams {..}
+
+-- | Fetch 'Auth.AuthHook' components from the environment and merge
+-- with the values consumed by the arg parser in 'AuthHookRaw'.
+mkAuthHook :: (Monad m) => AuthHookRaw -> WithEnvT m (Maybe Auth.AuthHook)
+mkAuthHook (AuthHookRaw mUrl mType mSendRequestBody) = do
+  mUrlEnv <- withOption mUrl authHookOption
+  -- Also support HASURA_GRAPHQL_AUTH_HOOK_TYPE
+  -- TODO (from master):- drop this in next major update <--- (NOTE: This comment is from 2020-08-21)
+  authMode <-
+    onNothing
+      mType
+      ( fromMaybe (_default authHookModeOption)
+          <$> considerEnvs
+            [_envVar authHookModeOption, "HASURA_GRAPHQL_AUTH_HOOK_TYPE"]
+      )
+  -- if authMode is `GET` then authSendRequestBody is set to `False`, otherwise we check for the config value
+  authSendRequestBody <-
+    case authMode of
+      Auth.AHTGet -> pure False
+      Auth.AHTPost ->
         onNothing
-          mType
-          ( fromMaybe (_default authHookModeOption)
+          mSendRequestBody
+          ( fromMaybe (_default authHookSendRequestBodyOption)
               <$> considerEnvs
-                [_envVar authHookModeOption, "HASURA_GRAPHQL_AUTH_HOOK_TYPE"]
+                [_envVar authHookSendRequestBodyOption]
           )
-      pure $ (`Auth.AuthHook` authMode) <$> mUrlEnv
+  pure $ (\url -> Auth.AuthHook url authMode authSendRequestBody) <$> mUrlEnv
 
-    mkCorsConfig mCfg = do
-      corsCfg <- do
-        corsDisabled <- withOptionDefault Nothing disableCorsOption
-        if corsDisabled
-          then pure (Cors.CCDisabled $ _default disableCorsOption)
-          else withOptionDefault mCfg corsDomainOption
-
-      readCookVal <-
-        case rsoWsReadCookie of
-          False -> withOptionDefault Nothing wsReadCookieOption
-          p -> pure p
-      wsReadCookie <- case (Cors.isCorsDisabled corsCfg, readCookVal) of
-        (True, _) -> pure readCookVal
-        (False, True) ->
-          throwError $
-            _envVar wsReadCookieOption
-              <> " can only be used when CORS is disabled"
-        (False, False) -> return False
-      pure $ case corsCfg of
-        Cors.CCDisabled _ -> Cors.CCDisabled wsReadCookie
-        _ -> corsCfg
-
-    mkResponseInternalErrorsConfig devMode = do
-      adminInternalErrors <- withOptionDefault rsoAdminInternalErrors graphqlAdminInternalErrorsOption
-
-      if
-          | devMode -> pure InternalErrorsAllRequests
-          | adminInternalErrors -> pure InternalErrorsAdminOnly
-          | otherwise -> pure InternalErrorsDisabled
-
-    mkConnectionOptions = do
-      webSocketCompressionFromEnv <- withOptionSwitch rsoWebSocketCompression webSocketCompressionOption
-      pure $
-        WebSockets.defaultConnectionOptions
-          { WebSockets.connectionCompressionOptions =
-              if webSocketCompressionFromEnv
-                then WebSockets.PermessageDeflateCompression WebSockets.defaultPermessageDeflate
-                else WebSockets.NoCompression
-          }
+-- | Fetch 'Cors.CorsConfig' settings from the environment and merge
+-- with the settings consumed by the arg parser.
+mkCorsConfig :: (Monad m) => ServeOptionsRaw imp -> Maybe Cors.CorsConfig -> WithEnvT m Cors.CorsConfig
+mkCorsConfig ServeOptionsRaw {..} mCfg = do
+  corsCfg <- do
+    corsDisabled <- withOptionDefault Nothing disableCorsOption
+    if corsDisabled
+      then pure (Cors.CCDisabled $ _default disableCorsOption)
+      else withOptionDefault mCfg corsDomainOption
+  readCookVal <-
+    case rsoWsReadCookie of
+      WsReadCookieDisabled -> withOptionDefault Nothing wsReadCookieOption
+      p -> pure p
+  wsReadCookie <- case (Cors.isCorsDisabled corsCfg, readCookVal) of
+    (True, _) -> pure readCookVal
+    (False, WsReadCookieEnabled) ->
+      throwError
+        $ _envVar wsReadCookieOption
+        <> " can only be used when CORS is disabled"
+    (False, WsReadCookieDisabled) -> pure WsReadCookieDisabled
+  pure $ case corsCfg of
+    Cors.CCDisabled _ -> Cors.CCDisabled $ isWsReadCookieEnabled wsReadCookie
+    _ -> corsCfg

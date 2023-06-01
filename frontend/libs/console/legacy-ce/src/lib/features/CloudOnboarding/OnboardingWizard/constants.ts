@@ -1,5 +1,6 @@
-import globals from '@/Globals';
-import { BASE_URL_TEMPLATE } from '@/components/Services/Data/Schema/TemplateGallery/templateGalleryConfig';
+import globals from '../../../Globals';
+import { BASE_URL_TEMPLATE } from '../../../components/Services/Data/Schema/TemplateGallery/templateGalleryConfig';
+import { UseCases } from './components/UseCaseScreen/UseCaseScreen';
 
 // This config is stored in root level index.js, and there is a config file in each directory which stores which
 // stores the directory structure.
@@ -65,8 +66,8 @@ export const getSchemaImageUrl = (baseUrl: string) => {
 export const NEON_ONBOARDING_QUERY_KEY = 'neonOnboarding';
 
 export const trackOnboardingActivityMutation = `
-  mutation trackOnboardingActivity($projectId: uuid!, $kind: String!, $error_code: String) {
-    trackOnboardingActivity(payload: {kind: $kind, project_id: $projectId, error_code: $error_code}) {
+  mutation trackOnboardingActivity($projectId: uuid!, $kind: String!, $error_code: String, $subkind: String,) {
+    trackOnboardingActivity(payload: {kind: $kind, project_id: $projectId, error_code: $error_code, subkind: $subkind}) {
       status
     }
 }
@@ -83,7 +84,16 @@ export const onboardingCompleteVariables = {
   kind: 'onboarding_complete',
 };
 
-export const skippedOnboardingVariables = {
+export const skippedOnboardingThroughURLParamVariables = {
+  ...mutationVariables,
+  kind: 'skipped_neon_onboarding_through_url_param',
+};
+export const skippedNeonOnboardingToConnectOtherDB = {
+  ...mutationVariables,
+  kind: 'skipped_neon_onboarding_to_connect_other_db',
+};
+
+export const skippedNeonOnboardingVariables = {
   ...mutationVariables,
   kind: 'skipped_onboarding',
 };
@@ -142,6 +152,21 @@ export const oneClickDeploymentOnboardingShown = {
   ...mutationVariables,
   kind: 'onboarded_through_one_click_deployment',
 };
+
+export const useCaseExperimentOnboarding = {
+  ...mutationVariables,
+  kind: 'onboarded_through_use_case_experiment',
+};
+
+export const skippedUseCaseExperimentOnboarding = {
+  ...mutationVariables,
+  kind: 'skipped_use_case_experiment_onboarding',
+};
+
+export const getUseCaseExperimentOnboardingVariables = (useCase: UseCases) => ({
+  ...useCaseExperimentOnboarding,
+  subkind: useCase,
+});
 
 export const getNeonOnboardingErrorVariables = (code: string) => {
   return {

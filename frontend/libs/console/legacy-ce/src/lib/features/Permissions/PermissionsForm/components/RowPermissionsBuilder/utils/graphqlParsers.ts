@@ -1,4 +1,4 @@
-import { MetadataTable } from '@/features/hasura-metadata-types';
+import { MetadataTable } from '../../../../../hasura-metadata-types';
 import {
   GraphQLFieldMap,
   GraphQLInputFieldMap,
@@ -52,6 +52,7 @@ export const getFields = (tableName: string, schema: GraphQLSchema) => {
 
   if (isObjectType(type) || isInputObjectType(type)) {
     const fields = type.getFields();
+
     return fields;
   }
 
@@ -140,22 +141,8 @@ export const getBoolOperators = () => {
   return ['_and', '_or', '_not'];
 };
 
-interface FindColumnArgs {
-  columnKey: string;
-  columnOperators: ReturnType<typeof getColumnOperators>;
-}
-
-/**
- *
- * finds the name and type of specified column
- */
-export const findColumnOperator = ({
-  columnKey,
-  columnOperators,
-}: FindColumnArgs) => {
-  const columnOperatorArray = columnKey.split('.');
-  const value = columnOperatorArray[columnOperatorArray.length - 1];
-  return columnOperators.find(({ name }) => name === value);
+const getExistOperators = () => {
+  return ['_exists'];
 };
 
 interface Args {
@@ -188,12 +175,18 @@ export const getAllColumnsAndOperators = ({
   const metadataTableName = tableConfig?.custom_name ?? tableName;
   const fields = getFields(metadataTableName, schema);
   const boolOperators = getBoolOperators();
+  const existOperators = getExistOperators();
   const columns = getColumns(fields);
   const relationships = getRelationships(fields);
 
   const boolMap = boolOperators.map(boolOperator => ({
     name: boolOperator,
     kind: 'boolOperator',
+    meta: null,
+  }));
+  const existMap = existOperators.map(existOperator => ({
+    name: existOperator,
+    kind: 'existOperator',
     meta: null,
   }));
   const colMap = columns.map(column => ({
@@ -206,5 +199,10 @@ export const getAllColumnsAndOperators = ({
     kind: 'relationship',
     meta: relationship,
   }));
-  return { boolOperators: boolMap, columns: colMap, relationships: relMap };
+  return {
+    boolOperators: boolMap,
+    existOperators: existMap,
+    columns: colMap,
+    relationships: relMap,
+  };
 };

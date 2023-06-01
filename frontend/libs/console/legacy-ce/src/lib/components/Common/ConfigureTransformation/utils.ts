@@ -4,8 +4,8 @@ import {
   RequestTransformBody,
   RequestTransformMethod,
   ResponseTranform,
-} from '@/metadata/types';
-import { getLSItem, setLSItem, LS_KEYS } from '@/utils/localStorage';
+} from '../../../metadata/types';
+import { getLSItem, setLSItem, LS_KEYS } from '../../../utils/localStorage';
 import {
   defaultRequestContentType,
   GraphiQlHeader,
@@ -90,7 +90,7 @@ export const setEnvVarsToLS = (envVars: KeyValuePair[]) => {
   const validEnvVars = envVars.filter(
     e => !isEmpty(e.name) && !isEmpty(e.value)
   );
-  setLSItem(`${LS_KEYS.webhookTransformEnvVars}`, JSON.stringify(validEnvVars));
+  setLSItem(LS_KEYS.webhookTransformEnvVars, JSON.stringify(validEnvVars));
 };
 
 export const getArrayFromServerPairObject = (

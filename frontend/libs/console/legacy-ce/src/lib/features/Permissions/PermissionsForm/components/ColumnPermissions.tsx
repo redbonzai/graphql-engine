@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from '@/new-components/Button';
-import { Collapse } from '@/new-components/deprecated';
-import { TableColumn } from '@/features/DataSource';
-import { useListAllTableColumns } from '@/features/Data';
+import { Button } from '../../../../new-components/Button';
+import { Collapse } from '../../../../new-components/deprecated';
+import { TableColumn } from '../../../DataSource';
+import { useListAllTableColumns } from '../../../Data';
 import { PermissionsConfirmationModal } from './RootFieldPermissions/PermissionsConfirmationModal';
 import { getEdForm } from '../../../../components/Services/Data/utils';
 import { useIsDisabled } from '../hooks/useIsDisabled';
@@ -19,7 +19,7 @@ import {
   QueryRootPermissionType,
 } from './RootFieldPermissions/types';
 
-const getAccessText = (queryType: any) => {
+const getAccessText = (queryType: string) => {
   if (queryType === 'insert') {
     return 'to set input for';
   }
@@ -94,6 +94,8 @@ export const ColumnPermissionsSection: React.FC<
   const [showConfirmation, setShowConfirmationModal] = useState<string | null>(
     null
   );
+  watch();
+
   const [selectedColumns, queryRootFields, subscriptionRootFields] = watch([
     'columns',
     'query_root_fields',
@@ -169,7 +171,6 @@ export const ColumnPermissionsSection: React.FC<
                 <strong>columns</strong>:
               </p>
             </div>
-
             <fieldset className="flex gap-4 flex-wrap">
               {columns?.map(fieldName => (
                 <label key={fieldName} className="flex gap-2 items-center">

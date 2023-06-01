@@ -2,19 +2,17 @@
 
 import React from 'react';
 
-import { ComponentStory, ComponentMeta } from '@storybook/react';
-import { ReactQueryDecorator } from '@/storybook/decorators/react-query';
+import { StoryFn, Meta } from '@storybook/react';
+import { ReactQueryDecorator } from '../../../../storybook/decorators/react-query';
 import { RenderWidget } from './RenderWidget';
 import { MODE } from '../../types';
 
 export default {
   component: RenderWidget,
   decorators: [ReactQueryDecorator()],
-} as ComponentMeta<typeof RenderWidget>;
+} as Meta<typeof RenderWidget>;
 
-export const WithManualConfiguration: ComponentStory<
-  typeof RenderWidget
-> = () => (
+export const WithManualConfiguration: StoryFn<typeof RenderWidget> = () => (
   <RenderWidget
     dataSourceName="chinook"
     table={{ name: 'Album', schema: 'public' }}

@@ -1,17 +1,11 @@
 import { parse, print } from 'graphql';
-import { Dispatch } from '@/types';
-import { cloudDataServiceApiClient } from '@/hooks/cloudDataServiceApiClient';
-import { Api } from '@/hooks/apiUtils';
-import { HasuraMetadataV3 } from '@/metadata/types';
-import { reactQueryClient } from '@/lib/reactQuery';
-import { programmaticallyTraceError } from '@/features/Analytics';
+import { cloudDataServiceApiClient } from '../../../hooks/cloudDataServiceApiClient';
+import { Api } from '../../../hooks/apiUtils';
+import { HasuraMetadataV3 } from '../../../metadata/types';
+import { reactQueryClient } from '../../../lib/reactQuery';
+import { programmaticallyTraceError } from '../../Analytics';
 import {
-  clickRunQueryButton,
-  forceGraphiQLIntrospection,
-  forceChangeGraphiqlQuery,
-} from '../../../components/Services/ApiExplorer/OneGraphExplorer/utils';
-import {
-  skippedOnboardingVariables,
+  skippedNeonOnboardingVariables,
   onboardingCompleteVariables,
   templateSummaryRunQueryClickVariables,
   templateSummaryRunQuerySkipVariables,
@@ -21,23 +15,39 @@ import {
   fetchAllOnboardingDataQuery,
   fetchAllOnboardingDataQueryVariables,
   oneClickDeploymentOnboardingShown,
+  useCaseExperimentOnboarding,
+  skippedOnboardingThroughURLParamVariables,
+  skippedUseCaseExperimentOnboarding,
+  skippedNeonOnboardingToConnectOtherDB,
 } from './constants';
 import { WizardState } from './hooks/useWizardState';
 import { OnboardingResponseData, UserOnboarding } from './types';
+import { getLSItem, LS_KEYS } from '../../../utils';
 
 export function shouldShowOnboarding(onboardingData: UserOnboarding) {
   const userActivity = onboardingData?.activity;
 
   if (
-    userActivity?.[skippedOnboardingVariables.kind]?.value === 'true' ||
+    userActivity?.[skippedNeonOnboardingVariables.kind]?.value === 'true' ||
+    userActivity?.[skippedUseCaseExperimentOnboarding.kind]?.value === 'true' ||
+    userActivity?.[skippedOnboardingThroughURLParamVariables.kind]?.value ===
+      'true' ||
+    userActivity?.[skippedNeonOnboardingToConnectOtherDB.kind]?.value ===
+      'true' ||
     userActivity?.[onboardingCompleteVariables.kind]?.value === 'true' ||
     userActivity?.[hasuraSourceCreationStartVariables.kind]?.value === 'true' ||
     userActivity?.[templateSummaryRunQuerySkipVariables.kind]?.value ===
       'true' ||
     userActivity?.[templateSummaryRunQueryClickVariables.kind]?.value ===
       'true' ||
+    userActivity?.[oneClickDeploymentOnboardingShown.kind]?.value === 'true' ||
+    userActivity?.[useCaseExperimentOnboarding.kind]?.value === 'true' ||
     userActivity?.[oneClickDeploymentOnboardingShown.kind]?.value === 'true'
   ) {
+    return false;
+  }
+  if (getLSItem(LS_KEYS.skipOnboarding) === 'true') {
+    emitOnboardingEvent(skippedOnboardingThroughURLParamVariables);
     return false;
   }
   return true;
@@ -81,7 +91,7 @@ export function getWizardState(
   const transformedOnboardingData = onboardingDataTransformFn(onboardingData);
   if (shouldShowOnboarding(transformedOnboardingData)) {
     if (showFamiliaritySurvey) return 'familiarity-survey';
-    return 'landing-page';
+    return 'use-case-onboarding';
   }
   return 'hidden';
 }
@@ -98,19 +108,6 @@ const cloudHeaders = {
   'content-type': 'application/json',
 };
 
-// persist skipped onboarding in the database
-export const persistSkippedOnboarding = () => {
-  // mutate server data
-  cloudDataServiceApiClient<ResponseDataOnMutation, ResponseDataOnMutation>(
-    trackOnboardingActivityMutation,
-    skippedOnboardingVariables,
-    cloudHeaders
-  ).catch(error => {
-    programmaticallyTraceError(error);
-    throw error;
-  });
-};
-
 export const emitOnboardingEvent = (variables: Record<string, unknown>) => {
   // mutate server data
   cloudDataServiceApiClient<ResponseDataOnMutation, ResponseDataOnMutation>(
@@ -118,7 +115,6 @@ export const emitOnboardingEvent = (variables: Record<string, unknown>) => {
     variables,
     cloudHeaders
   ).catch(error => {
-    console.error(error);
     programmaticallyTraceError(error);
   });
 };
@@ -209,23 +205,6 @@ export function getQueryFromSampleQueries(
     definitions: [queryDef],
   });
 }
-
-export const runQueryInGraphiQL = () => {
-  clickRunQueryButton();
-};
-
-export const fillSampleQueryInGraphiQL = (
-  query: string,
-  dispatch: Dispatch
-) => {
-  forceGraphiQLIntrospection(dispatch);
-
-  // this timeout makes sure that there's a delay in setting query after introspection has been fired
-  // this timeout does not intend to wait for introspection to finish
-  setTimeout(() => {
-    forceChangeGraphiqlQuery(query, dispatch);
-  }, 500);
-};
 
 export const fetchAllOnboardingDataQueryFn = () =>
   cloudDataServiceApiClient<OnboardingResponseData, OnboardingResponseData>(

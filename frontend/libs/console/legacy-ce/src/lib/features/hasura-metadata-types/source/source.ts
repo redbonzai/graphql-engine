@@ -1,11 +1,14 @@
-import { Driver } from '@/dataSources';
+import { Driver } from '../../../dataSources';
 import {
   BigQueryConfiguration,
   CitusConfiguration,
   MssqlConfiguration,
   PostgresConfiguration,
 } from './configuration';
-import { MetadataTable } from './table';
+import { LogicalModel } from './logicalModel';
+import { NativeQuery } from './nativeQuery';
+import { MetadataTable, Table } from './table';
+import { StoredProcedure } from './storedProcedure';
 
 export type NativeDrivers =
   | 'postgres'
@@ -15,8 +18,12 @@ export type NativeDrivers =
   | 'bigquery'
   | 'citus'
   | 'cockroach';
-export type GDCDriver = string;
-export type SupportedDrivers = Driver | GDCDriver;
+
+export type SuperConnectorDrivers = 'snowflake' | 'athena' | 'mysql8' | string;
+
+export type SupportedDrivers = Driver | SuperConnectorDrivers;
+
+export type NamingConvention = 'hasura-default' | 'graphql-default';
 
 export type SourceCustomization = {
   root_fields?: {
@@ -28,11 +35,11 @@ export type SourceCustomization = {
     prefix?: string;
     suffix?: string;
   };
-  naming_convention?: string;
+  naming_convention?: NamingConvention;
 };
 
-export type PGFunction = {
-  function: string | { name: string; schema: string };
+export type MetadataFunction = {
+  function: QualifiedFunction;
   configuration?: {
     custom_name?: string;
     custom_root_fields?: {
@@ -41,6 +48,10 @@ export type PGFunction = {
     };
     session_argument?: string;
     exposed_as?: 'mutation' | 'query';
+    response?: {
+      type: 'table';
+      table: Table;
+    };
   };
 };
 
@@ -48,11 +59,14 @@ export type Source = {
   name: string;
   tables: MetadataTable[];
   customization?: SourceCustomization;
+  functions?: MetadataFunction[];
+  logical_models?: LogicalModel[];
+  native_queries?: NativeQuery[];
+  stored_procedures?: StoredProcedure[];
 } & (
   | {
       kind: 'postgres';
       configuration: PostgresConfiguration;
-      functions?: PGFunction[];
     }
   | {
       kind: 'mssql';
@@ -73,5 +87,27 @@ export type Source = {
        */
       kind: Exclude<SupportedDrivers, NativeDrivers>;
       configuration: unknown;
+      logical_models?: never;
+      native_queries?: never;
     }
 );
+
+export type QualifiedFunction = unknown;
+export type { LogicalModel, LogicalModelField } from './logicalModel';
+export type { NativeQuery, NativeQueryArgument } from './nativeQuery';
+export type {
+  StoredProcedure,
+  StoredProcedureArgument,
+  QualifiedStoredProcedure,
+} from './storedProcedure';
+
+export type BulkKeepGoingResponse = [
+  | {
+      message: 'success';
+    }
+  | {
+      code: string;
+      error: string;
+      path: string;
+    }
+];

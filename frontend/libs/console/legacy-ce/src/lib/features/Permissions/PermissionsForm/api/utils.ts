@@ -1,17 +1,39 @@
-import produce from 'immer';
+import produce, { original } from 'immer';
 
-import { allowedMetadataTypes } from '@/features/MetadataAPI';
+import { allowedMetadataTypes } from '../../../MetadataAPI';
 
-import { AccessType } from '../../types';
+import { AccessType, QueryType } from '../../types';
 import { PermissionsSchema } from '../../schema';
+import { areTablesEqual } from '../../../hasura-metadata-api';
+import { Table } from '../../../hasura-metadata-types';
+import { getTableDisplayName } from '../../../DatabaseRelationships';
+
+const formatFilterValues = (formFilter: Record<string, any>[] = []) => {
+  return Object.entries(formFilter).reduce<Record<string, any>>(
+    (acc, [operator, value]) => {
+      if (operator === '_and' || operator === '_or') {
+        const filteredEmptyObjects = (value as any[]).filter(
+          p => Object.keys(p).length !== 0
+        );
+        acc[operator] = filteredEmptyObjects;
+        return acc;
+      }
+
+      acc[operator] = value;
+      return acc;
+    },
+    {}
+  );
+};
 
 type SelectPermissionMetadata = {
   columns: string[];
+  set: Record<string, any>;
   filter: Record<string, any>;
   allow_aggregations?: boolean;
   limit?: number;
-  query_root_fields?: any[];
-  subscription_root_fields?: any[];
+  query_root_fields?: string[];
+  subscription_root_fields?: string[];
 };
 
 const createSelectObject = (input: PermissionsSchema) => {
@@ -20,25 +42,13 @@ const createSelectObject = (input: PermissionsSchema) => {
       .filter(({ 1: value }) => value)
       .map(([key]) => key);
 
-    // in row permissions builder an extra input is rendered automatically
-    // this will always be empty and needs to be removed
-    const filter = Object.entries(input.filter).reduce<Record<string, any>>(
-      (acc, [operator, value]) => {
-        if (operator === '_and' || operator === '_or') {
-          const newValue = (value as any[])?.slice(0, -1);
-          acc[operator] = newValue;
-          return acc;
-        }
-
-        acc[operator] = value;
-        return acc;
-      },
-      {}
-    );
+    // Input may be undefined
+    const filter = formatFilterValues(input.filter);
 
     const permissionObject: SelectPermissionMetadata = {
       columns,
       filter,
+      set: {},
       allow_aggregations: input.aggregationEnabled,
     };
 
@@ -57,7 +67,107 @@ const createSelectObject = (input: PermissionsSchema) => {
     return permissionObject;
   }
 
-  return {};
+  throw new Error('Case not handled');
+};
+
+type InsertPermissionMetadata = {
+  columns: string[];
+  check: Record<string, any>;
+  allow_upsert: boolean;
+  backend_only?: boolean;
+  set: Record<string, any>;
+};
+
+const createInsertObject = (input: PermissionsSchema) => {
+  if (input.queryType === 'insert') {
+    const columns = Object.entries(input.columns)
+      .filter(({ 1: value }) => value)
+      .map(([key]) => key);
+
+    const set =
+      input?.presets?.reduce((acc, preset) => {
+        if (preset.columnName === 'default') return acc;
+        return { ...acc, [preset.columnName]: preset.columnValue };
+      }, {}) ?? {};
+
+    const permissionObject: InsertPermissionMetadata = {
+      columns,
+      check: input.check,
+      allow_upsert: true,
+      set,
+      backend_only: input.backendOnly,
+    };
+
+    return permissionObject;
+  }
+
+  throw new Error('Case not handled');
+};
+
+export type DeletePermissionMetadata = {
+  columns?: string[];
+  set?: Record<string, any>;
+  backend_only: boolean;
+  filter: Record<string, any>;
+};
+
+const createDeleteObject = (input: PermissionsSchema) => {
+  if (input.queryType === 'delete') {
+    // Input may be undefined
+    const filter = formatFilterValues(input.filter);
+
+    const permissionObject: DeletePermissionMetadata = {
+      backend_only: input.backendOnly || false,
+      filter,
+    };
+
+    return permissionObject;
+  }
+
+  throw new Error('Case not handled');
+};
+
+type UpdatePermissionMetadata = {
+  columns: string[];
+  filter: Record<string, any>; // filter is PRE
+  check?: Record<string, any>; // check is POST
+  backend_only?: boolean;
+  set: Record<string, any>;
+};
+
+const createUpdateObject = (input: PermissionsSchema) => {
+  if (input.queryType === 'update') {
+    const columns = Object.entries(input.columns)
+      .filter(({ 1: value }) => value)
+      .map(([key]) => key);
+
+    const filter = formatFilterValues(input.filter);
+
+    const check = formatFilterValues(input.check);
+    const set =
+      input?.presets?.reduce((acc, preset) => {
+        if (preset.columnName === 'default') return acc;
+        const isNumber = !isNaN(Number(preset.columnValue));
+        return {
+          ...acc,
+          [preset.columnName]: isNumber
+            ? Number(preset.columnValue)
+            : preset.columnValue,
+        };
+      }, {}) ?? {};
+
+    const permissionObject: UpdatePermissionMetadata = {
+      columns,
+      filter,
+      check,
+      set,
+      backend_only: input.backendOnly,
+    };
+
+    return permissionObject;
+  }
+
+  throw new Error('Case not handled');
 };
 
 /**
@@ -65,14 +175,14 @@ const createSelectObject = (input: PermissionsSchema) => {
  */
 const createPermission = (formData: PermissionsSchema) => {
   switch (formData.queryType) {
-    case 'insert':
-      return {};
     case 'select':
       return createSelectObject(formData);
+    case 'insert':
+      return createInsertObject(formData);
     case 'update':
-      return {};
+      return createUpdateObject(formData);
     case 'delete':
-      return {};
+      return createDeleteObject(formData);
     default:
       throw new Error('Case not handled');
   }
@@ -81,6 +191,7 @@ const createPermission = (formData: PermissionsSchema) => {
 export interface CreateInsertArgs {
   dataSourceName: string;
   table: unknown;
+  tables: Table[];
   queryType: any;
   role: string;
   accessType: AccessType;
@@ -89,11 +200,65 @@ export interface CreateInsertArgs {
   driver: string;
 }
 
-interface ExistingPermission {
+export interface ExistingPermission {
   table: unknown;
   role: string;
-  queryType: any;
+  queryType: string;
 }
+
+/**
+ * When cloning permissions we have to transform the payload between filter and checks.
+ * The input per type is:
+ * select uses filter
+ * delete uses filter
+ * insert uses check
+ * update uses filter(for pre-check) and check (for post-check)
+ *
+ * When cloning between the permissions type we need to swap these out based on with way we are cloning
+ */
+const getPermissionsWithMappedRowPermissions = (
+  permissionsObject: any,
+  mainQueryType: QueryType,
+  clonedQueryType: string
+): {
+  filter?: Record<string, any>;
+  check?: Record<string, any>;
+  columns?: string[];
+} => {
+  const clone: {
+    filter?: Record<string, any>;
+    check?: Record<string, any>;
+    columns?: string[];
+  } = {
+    filter: permissionsObject.filter,
+    check: permissionsObject.check,
+  };
+
+  if (
+    (mainQueryType === 'select' && clonedQueryType === 'insert') ||
+    (mainQueryType === 'select' && clonedQueryType === 'update') ||
+    (mainQueryType === 'delete' && clonedQueryType === 'insert') ||
+    (mainQueryType === 'delete' && clonedQueryType === 'update')
+  ) {
+    clone.check = permissionsObject.filter;
+  }
+
+  if (
+    (mainQueryType === 'update' && clonedQueryType === 'select') ||
+    (mainQueryType === 'update' && clonedQueryType === 'delete') ||
+    (mainQueryType === 'insert' && clonedQueryType === 'select') ||
+    (mainQueryType === 'insert' && clonedQueryType === 'delete') ||
+    (mainQueryType === 'insert' && clonedQueryType === 'update')
+  ) {
+    clone.filter = permissionsObject.check;
+  }
+
+  if (mainQueryType === 'delete')
+    clone.columns = permissionsObject.columns || [];
+
+  return { filter: clone.filter, check: clone.check, columns: clone.columns };
+};
+
 /**
  * creates the insert arguments to update permissions
  * adds cloned permissions
@@ -107,9 +272,9 @@ export const createInsertArgs = ({
   formData,
   existingPermissions,
   driver,
+  tables,
 }: CreateInsertArgs) => {
   const permission = createPermission(formData);
-
   // create args object with args from form
   const initialArgs = [
     {
@@ -127,7 +292,7 @@ export const createInsertArgs = ({
     // determine if args from form already exist
     const permissionExists = existingPermissions.find(
       existingPermission =>
-        JSON.stringify(existingPermission.table) === JSON.stringify(table) &&
+        areTablesEqual(existingPermission.table, table) &&
         existingPermission.role === role &&
         existingPermission.queryType === queryType
     );
@@ -144,60 +309,73 @@ export const createInsertArgs = ({
       } as (typeof initialArgs)[0]);
     }
 
-    // this has been commented out as cloned permissions is not currently used
-    // it's been left in because it could be useful when clone permissions is added back in
-
     // last item is always empty default
-    // const clonedPermissions = formData?.clonePermissions?.slice(0, -1);
+    const clonedPermissions = formData?.clonePermissions?.slice(0, -1);
 
-    // if (clonedPermissions?.length) {
-    //   clonedPermissions.forEach(clonedPermission => {
-    //     // if permissions are being applied to a different table
-    //     // columns and presets should be blank
-    //     const permissionWithColumnsAndPresetsRemoved = produce(
-    //       permission,
-    //       d => {
-    //         if (clonedPermission.tableName !== table) {
-    //           d.columns = [];
-    //           d.presets = {};
-    //         }
+    if (clonedPermissions?.length) {
+      clonedPermissions.forEach(clonedPermission => {
+        const clonedPermissionTable = tables.find(
+          t => getTableDisplayName(t) === clonedPermission.tableName
+        );
+        // if permissions are being applied to a different table
+        // columns and presets should be blank
+        const permissionWithColumnsAndPresetsRemoved = produce(
+          permission,
+          d => {
+            if (!areTablesEqual(clonedPermissionTable, table)) {
+              d.columns = [];
+              d.set = {};
+            }
 
-    //         return d;
-    //       }
-    //     );
-    //     // add each closed permission to args
-    //     draft.push({
-    //       type: `${driver}_create_${clonedPermission.queryType}_permission` as allowedMetadataTypes,
-    //       args: {
-    //         table: clonedPermission.tableName || '',
-    //         role: clonedPermission.roleName || '',
-    //         permission: permissionWithColumnsAndPresetsRemoved,
-    //         source: dataSourceName,
-    //       },
-    //     });
+            const newValues = {
+              ...getPermissionsWithMappedRowPermissions(
+                original(d),
+                queryType,
+                clonedPermission.queryType
+              ),
+            };
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            d.filter = newValues.filter;
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            d.check = newValues.check;
+            d.columns = newValues.columns;
+          }
+        );
 
-    //     // determined if the cloned permission already exists
-    //     const clonedPermissionExists = existingPermissions.find(
-    //       existingPermission =>
-    //         JSON.stringify(existingPermission.table) ===
-    //           JSON.stringify(clonedPermission.tableName) &&
-    //         existingPermission.role === clonedPermission.roleName &&
-    //         existingPermission.queryType === clonedPermission.queryType
-    //     );
+        // add each closed permission to args
+        draft.push({
+          type: `${driver}_create_${clonedPermission.queryType}_permission` as allowedMetadataTypes,
+          args: {
+            table: clonedPermissionTable || '',
+            role: clonedPermission.roleName || '',
+            permission: permissionWithColumnsAndPresetsRemoved,
+            source: dataSourceName,
+          },
+        });
 
-    //     // if it already exists drop it
-    //     if (clonedPermissionExists) {
-    //       draft.unshift({
-    //         type: `${driver}_drop_${clonedPermission.queryType}_permission` as allowedMetadataTypes,
-    //         args: {
-    //           table: clonedPermission.tableName,
-    //           role: clonedPermission.roleName,
-    //           source: dataSourceName,
-    //         },
-    //       } as typeof initialArgs[0]);
-    //     }
-    //   });
-    // }
+        // determined if the cloned permission already exists
+        const clonedPermissionExists = existingPermissions.find(
+          existingPermission =>
+            areTablesEqual(existingPermission.table, clonedPermissionTable) &&
+            existingPermission.role === clonedPermission.roleName &&
+            existingPermission.queryType === clonedPermission.queryType
+        );
+
+        // if it already exists drop it
+        if (clonedPermissionExists) {
+          draft.unshift({
+            type: `${driver}_drop_${clonedPermission.queryType}_permission` as allowedMetadataTypes,
+            args: {
+              table: clonedPermissionTable,
+              role: clonedPermission.roleName,
+              source: dataSourceName,
+            },
+          } as (typeof initialArgs)[0]);
+        }
+      });
+    }
   });
 
   return args;

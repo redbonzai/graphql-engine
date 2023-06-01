@@ -7,6 +7,7 @@ module Hasura.Backends.Postgres.SQL.DML
     BinOp (AndOp, OrOp),
     BoolExp (..),
     TopLevelCTE (CTEDelete, CTEInsert, CTESelect, CTEUpdate, CTEUnsafeRawSQL),
+    InnerCTE (..),
     CompareOp (SContainedIn, SContains, SEQ, SGT, SGTE, SHasKey, SHasKeysAll, SHasKeysAny, SILIKE, SIREGEX, SLIKE, SLT, SLTE, SMatchesFulltext, SNE, SNILIKE, SNIREGEX, SNLIKE, SNREGEX, SNSIMILAR, SREGEX, SSIMILAR),
     CountType (CTDistinct, CTSimple, CTStar),
     DistinctExpr (DistinctOn, DistinctSimple),
@@ -31,7 +32,6 @@ module Hasura.Backends.Postgres.SQL.DML
     OrderType (OTAsc, OTDesc),
     QIdentifier (QIdentifier),
     Qual (QualTable, QualVar, QualifiedIdentifier),
-    RawQuery (..),
     RetExp (RetExp),
     SQLConflict (..),
     SQLConflictTarget (SQLColumn, SQLConstraint),
@@ -108,7 +108,7 @@ where
 
 import Data.Aeson qualified as J
 import Data.Aeson.Casing qualified as J
-import Data.HashMap.Strict qualified as HM
+import Data.HashMap.Strict qualified as HashMap
 import Data.Int (Int64)
 import Data.String (fromString)
 import Data.Text (pack)
@@ -125,7 +125,7 @@ import Text.Builder qualified as TB
 data Select = Select
   { -- | Unlike 'SelectWith', does not allow data-modifying statements (as those are only allowed at
     -- the top level of a query).
-    selCTEs :: [(TableAlias, Select)],
+    selCTEs :: [(TableAlias, InnerCTE)],
     selDistinct :: Maybe DistinctExpr,
     selExtr :: [Extractor],
     selFrom :: Maybe FromExp,
@@ -281,8 +281,8 @@ mkRowExp extrs =
         mkSelect
           { selExtr = [Extractor (SERowIdentifier $ toIdentifier innerSelName) Nothing],
             selFrom =
-              Just $
-                FromExp
+              Just
+                $ FromExp
                   [mkSelFromExp False innerSel innerSelName]
           }
    in SESelect outerSel
@@ -316,7 +316,7 @@ instance ToSQL Select where
         <~> toSQL (selLimit sel)
         <~> toSQL (selOffset sel)
     -- reuse SelectWith if there are any CTEs, since the generated SQL is the same
-    ctes -> toSQL $ SelectWith (map (CTESelect <$>) ctes) sel {selCTEs = []}
+    ctes -> toSQL $ SelectWith (map (toTopLevelCTE <$>) ctes) sel {selCTEs = []}
 
 mkSIdenExp :: (IsIdentifier a) => a -> SQLExp
 mkSIdenExp = SEIdentifier . toIdentifier
@@ -349,7 +349,7 @@ mkQIdentifier q t = QIdentifier (QualifiedIdentifier q Nothing) (toIdentifier t)
 mkQIdentifierTable :: (IsIdentifier a) => QualifiedTable -> a -> QIdentifier
 mkQIdentifierTable q = QIdentifier (mkQual q) . toIdentifier
 
-mkIdentifierSQLExp :: forall a. IsIdentifier a => Qual -> a -> SQLExp
+mkIdentifierSQLExp :: forall a. (IsIdentifier a) => Qual -> a -> SQLExp
 mkIdentifierSQLExp q = SEQIdentifier . QIdentifier q . toIdentifier
 
 data QIdentifier
@@ -676,7 +676,7 @@ instance ToSQL DistinctExpr where
 
 data FunctionArgs = FunctionArgs
   { fasPostional :: [SQLExp],
-    fasNamed :: (HM.HashMap Text SQLExp)
+    fasNamed :: (HashMap.HashMap Text SQLExp)
   }
   deriving (Show, Eq, Generic, Data)
 
@@ -686,8 +686,8 @@ instance Hashable FunctionArgs
 
 instance ToSQL FunctionArgs where
   toSQL (FunctionArgs positionalArgs namedArgsMap) =
-    let namedArgs = flip map (HM.toList namedArgsMap) $
-          \(argName, argVal) -> SENamedArg (Identifier argName) argVal
+    let namedArgs = flip map (HashMap.toList namedArgsMap)
+          $ \(argName, argVal) -> SENamedArg (Identifier argName) argVal
      in parenB $ ", " <+> (positionalArgs <> namedArgs)
 
 data FunctionDefinitionListItem = FunctionDefinitionListItem
@@ -729,8 +729,8 @@ functionNameToTableAlias = mkTableAlias . qualifiedObjectToText
 --   Using the function name as the relation name, and the columns as the relation schema.
 mkFunctionAlias :: QualifiedObject FunctionName -> Maybe [(ColumnAlias, PGScalarType)] -> FunctionAlias
 mkFunctionAlias alias listM =
-  FunctionAlias (functionNameToTableAlias alias) $
-    fmap (map (uncurry FunctionDefinitionListItem)) listM
+  FunctionAlias (functionNameToTableAlias alias)
+    $ fmap (map (uncurry FunctionDefinitionListItem)) listM
 
 instance ToSQL FunctionAlias where
   toSQL (FunctionAlias tableAlias (Just definitionList)) =
@@ -899,16 +899,16 @@ simplifyBoolExp be = case be of
     let e1s = simplifyBoolExp e1
         e2s = simplifyBoolExp e2
      in if
-            | e1s == BELit True -> e2s
-            | e2s == BELit True -> e1s
-            | otherwise -> BEBin AndOp e1s e2s
+          | e1s == BELit True -> e2s
+          | e2s == BELit True -> e1s
+          | otherwise -> BEBin AndOp e1s e2s
   BEBin OrOp e1 e2 ->
     let e1s = simplifyBoolExp e1
         e2s = simplifyBoolExp e2
      in if
-            | e1s == BELit False -> e2s
-            | e2s == BELit False -> e1s
-            | otherwise -> BEBin OrOp e1s e2s
+          | e1s == BELit False -> e2s
+          | e2s == BELit False -> e1s
+          | otherwise -> BEBin OrOp e1s e2s
   e -> e
 
 mkExists :: FromItem -> BoolExp -> BoolExp
@@ -1040,15 +1040,16 @@ newtype SetExpItem = SetExpItem (PGCol, SQLExp)
 
 buildUpsertSetExp ::
   [PGCol] ->
-  HM.HashMap PGCol SQLExp ->
+  HashMap.HashMap PGCol SQLExp ->
   SetExp
 buildUpsertSetExp cols preSet =
-  SetExp $ map SetExpItem $ HM.toList setExps
+  SetExp $ map SetExpItem $ HashMap.toList setExps
   where
-    setExps = HM.union preSet $
-      HM.fromList $
-        flip map cols $ \col ->
-          (col, SEExcluded $ toIdentifier col)
+    setExps = HashMap.union preSet
+      $ HashMap.fromList
+      $ flip map cols
+      $ \col ->
+        (col, SEExcluded $ toIdentifier col)
 
 newtype UsingExp = UsingExp [TableName]
   deriving (Show, Eq)
@@ -1171,7 +1172,7 @@ data TopLevelCTE
   | CTEInsert SQLInsert
   | CTEUpdate SQLUpdate
   | CTEDelete SQLDelete
-  | CTEUnsafeRawSQL RawQuery
+  | CTEUnsafeRawSQL (InterpolatedQuery SQLExp)
   deriving (Show, Eq)
 
 instance ToSQL TopLevelCTE where
@@ -1180,7 +1181,30 @@ instance ToSQL TopLevelCTE where
     CTEInsert q -> toSQL q
     CTEUpdate q -> toSQL q
     CTEDelete q -> toSQL q
-    CTEUnsafeRawSQL (RawQuery q) -> TB.text q
+    CTEUnsafeRawSQL (InterpolatedQuery parts) ->
+      foldMap
+        ( \case
+            IIText t -> TB.text t
+            IIVariable v -> toSQL v
+        )
+        parts
+        -- if the user has a comment on the last line, this will make sure it doesn't interrupt the rest of the query
+        <> "\n"
+
+-- | Represents a common table expresion that can be used in nested selects.
+data InnerCTE
+  = ICTESelect Select
+  | ICTEUnsafeRawSQL (InterpolatedQuery SQLExp)
+  deriving (Show, Eq, Generic, Data)
+
+instance NFData InnerCTE
+
+instance Hashable InnerCTE
+
+toTopLevelCTE :: InnerCTE -> TopLevelCTE
+toTopLevelCTE = \case
+  ICTESelect select -> CTESelect select
+  ICTEUnsafeRawSQL query -> CTEUnsafeRawSQL query
 
 -- | A @SELECT@ statement with Common Table Expressions.
 --   <https://www.postgresql.org/docs/current/queries-with.html>

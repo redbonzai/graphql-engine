@@ -12991,6 +12991,8 @@ sources:
                       - subconferenceId:
                           _in: X-Hasura-Subconference-Ids
     native_queries: null
+    stored_procedures: null
+    logical_models: null
     functions:
       - function:
           schema: collection

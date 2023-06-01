@@ -1,11 +1,12 @@
 import React from 'react';
-import { DropdownMenu } from '@/new-components/DropdownMenu';
+import { DropdownMenu } from '../../../../../new-components/DropdownMenu';
 import { RiMore2Fill } from 'react-icons/ri';
 
 export const RowOptionsButton: React.VFC<{
   row: Record<string, any>;
   onOpen: (row: Record<string, any>) => void;
-}> = ({ row, onOpen }) => (
+  onDelete: (row: Record<string, any>) => void;
+}> = ({ row, onOpen, onDelete }) => (
   <div className="group relative">
     <div>
       <DropdownMenu
@@ -13,6 +14,9 @@ export const RowOptionsButton: React.VFC<{
           [
             <div className="p-2" onClick={() => onOpen(row)}>
               Open
+            </div>,
+            <div className="p-2" onClick={() => onDelete(row)}>
+              Delete
             </div>,
           ],
         ]}

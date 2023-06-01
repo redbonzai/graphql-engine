@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Button } from '@/new-components/Button';
-import { Analytics, REDACT_EVERYTHING } from '@/features/Analytics';
+import { Button } from '../../../../new-components/Button';
+import { Analytics, REDACT_EVERYTHING } from '../../../../features/Analytics';
 import { permissionTypes, getTableNameFromDef } from '../utils';
 import CheckIcon from '../../../Common/Icons/Check';
 import CrossIcon from '../../../Common/Icons/Cross';
@@ -328,7 +328,7 @@ const MetadataStatus = ({ dispatch, metadata }) => {
 
   return (
     <Analytics name="MetadataStatus" {...REDACT_EVERYTHING}>
-      <div className="mb-md">
+      <div className="mb-md bootstrap-jail">
         {banner()}
         <div className="clear-both pl-md mt-md mb-md">
           <h2 className="text-xl font-bold">Hasura Metadata Status</h2>

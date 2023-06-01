@@ -1,17 +1,14 @@
 import React from 'react';
-import { useAppDispatch } from '@/store';
-import { programmaticallyTraceError } from '@/features/Analytics';
+import { useAppDispatch } from '../../../../../storeHooks';
+import { programmaticallyTraceError } from '../../../../Analytics';
 import {
   FetchOneClickDeploymentStateLogSubscriptionSubscription,
   FetchOneClickDeploymentStateLogSubscriptionSubscriptionVariables,
   FETCH_ONE_CLICK_DEPLOYMENT_STATE_LOG_SUBSCRIPTION,
   controlPlaneClient,
-} from '@/features/ControlPlane';
-import { reactQueryClient } from '@/lib/reactQuery';
-import {
-  forceChangeGraphiqlQuery,
-  forceGraphiQLIntrospection,
-} from '../../../../../components/Services/ApiExplorer/OneGraphExplorer/utils';
+} from '../../../../ControlPlane';
+import { reactQueryClient } from '../../../../../lib/reactQuery';
+import { forceGraphiQLIntrospection } from '../../../../../components/Services/ApiExplorer/OneGraphExplorer/utils';
 import {
   RequiredEnvVar,
   OneClickDeploymentState,
@@ -24,11 +21,12 @@ import {
   isHasuraPath,
   shouldTriggerFirstDeployment,
 } from '../../util';
+import { fillSampleQueryInGraphiQL } from '../../../utils';
 import { CliScreen } from '../CliScreen/CliScreen';
 import { RedirectCountDown } from '../RedirectCountdown/RedirectCountDown';
 import { Disclaimer } from '../Disclaimer/Disclaimer';
 import { EnvVarsForm } from '../EnvVarsForm/EnvVarsForm';
-import { useTriggerDeployment } from '../../hooks';
+import { useTriggerDeployment, useSampleQuery } from '../../hooks';
 import { getTenantEnvVarsQueryKey } from '../../constants';
 
 type WorkflowProgressProps = {
@@ -37,6 +35,7 @@ type WorkflowProgressProps = {
   projectId: string;
   gitRepoName: string;
   onCompleteSuccess?: VoidFunction;
+  sampleQueriesFileUrl: string;
   onCompleteError?: VoidFunction;
   fallbackApps: FallbackApp[];
 };
@@ -49,6 +48,7 @@ export function WorkflowProgress(props: WorkflowProgressProps) {
     onCompleteSuccess,
     onCompleteError,
     fallbackApps,
+    sampleQueriesFileUrl,
   } = props;
   const dispatch = useAppDispatch();
 
@@ -81,13 +81,13 @@ export function WorkflowProgress(props: WorkflowProgressProps) {
       }
 
       setEnvVarsFormState('default');
-    }
-    const sufficientEnvStepStatus =
-      progressState[OneClickDeploymentState.SufficientEnvironmentVariables];
-    if (sufficientEnvStepStatus.kind === 'success') {
+    } else {
       setEnvVarsFormState('hidden');
     }
   }, [progressState]);
+
+  // get the sample query associated with this deployment to prefill in graphiql
+  const query = useSampleQuery(sampleQueriesFileUrl);
 
   // set appropriate stepper index on checkpoints
   React.useEffect(() => {
@@ -103,8 +103,8 @@ export function WorkflowProgress(props: WorkflowProgressProps) {
       // this timeout makes sure that there's a delay in setting query after introspection has been fired
       // this timeout does not intend to wait for introspection to finish
       setTimeout(() => {
-        // change the query to empty string, to remove the default comment(for empty new projects) in graphiQL
-        forceChangeGraphiqlQuery('', dispatch);
+        // update the default sample query in GraphiQL tab to the query provided by user, or replace it by empty string.
+        fillSampleQueryInGraphiQL(query, dispatch);
       }, 500);
       setStepperIndex(3);
       return;
@@ -120,7 +120,7 @@ export function WorkflowProgress(props: WorkflowProgressProps) {
     }
 
     setStepperIndex(1);
-  }, [progressState]);
+  }, [progressState, query]);
 
   // subscribe to the one click deployment workflow state in the database
   React.useEffect(() => {
@@ -159,14 +159,10 @@ export function WorkflowProgress(props: WorkflowProgressProps) {
         );
       },
       error => {
-        programmaticallyTraceError(
-          new Error('failed subscribing to one click deployment status'),
-          {
-            errorMessage: error.message,
-            sourceError: error,
-          },
-          'error'
-        );
+        programmaticallyTraceError({
+          error: 'failed subscribing to one click deployment status',
+          cause: error,
+        });
       }
     );
     return () => {

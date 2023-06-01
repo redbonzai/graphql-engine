@@ -1,11 +1,11 @@
 import React from 'react';
-import { IndicatorCard } from '@/new-components/IndicatorCard';
+import { IndicatorCard } from '../../../../new-components/IndicatorCard';
 import Skeleton from 'react-loading-skeleton';
 import { ModifyTableProps } from '../ModifyTable';
 import { ForeignKeyDescription } from './ForeignKeyDescription';
 import { useTableForeignKeys } from '../hooks/useTableForeignKeys';
 
-interface ForeignKeysProps extends ModifyTableProps {}
+type ForeignKeysProps = ModifyTableProps;
 export const ForeignKeys: React.VFC<ForeignKeysProps> = props => {
   const { dataSourceName, table } = props;
   const { data, isLoading, isError } = useTableForeignKeys({

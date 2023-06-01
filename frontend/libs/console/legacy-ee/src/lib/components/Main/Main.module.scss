@@ -238,6 +238,7 @@
 }
 
 .clusterInfoWrapper {
+  align-items: stretch;
   width: auto;
   margin-left: auto;
   display: flex;
@@ -631,6 +632,7 @@
 
     .navSideBarActive {
       border-bottom: 4px solid #ffc627;
+      color: #ffc627 !important;
 
       i {
         color: #ffc627;
@@ -999,6 +1001,7 @@
 .headerRightNavbarBtn {
   display: flex;
   align-items: center;
+  height: 100%;
   padding: 15px;
   position: relative;
   color: #fff;
@@ -1294,14 +1297,6 @@
     letter-spacing: 0.4px;
     border: 0;
   }
-}
-
-.telemetryNotification {
-  background-color: red;
-  padding: 10px;
-  position: fixed;
-  bottom: 50px;
-  right: 0px;
 }
 
 .overlappingExclamation {

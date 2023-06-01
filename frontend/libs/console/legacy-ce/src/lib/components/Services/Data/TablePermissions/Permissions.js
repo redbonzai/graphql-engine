@@ -1,13 +1,15 @@
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
-import { Analytics, REDACT_EVERYTHING } from '@/features/Analytics';
+import clsx from 'clsx';
+import { Analytics, REDACT_EVERYTHING } from '../../../../features/Analytics';
 import JSONEditor from './JSONEditor';
-import { IconTooltip } from '@/new-components/Tooltip';
+import { IconTooltip } from '../../../../new-components/Tooltip';
 import InputGroup from 'react-bootstrap/lib/InputGroup';
 import 'brace/mode/json';
 import 'brace/theme/github';
-import { LS_KEYS, setLSItem, getLSItem } from '@/utils/localStorage';
-import { Button } from '@/new-components/Button';
+import { LS_KEYS, setLSItem, getLSItem } from '../../../../utils/localStorage';
+import { Button } from '../../../../new-components/Button';
+import { LearnMoreLink } from '../../../../new-components/LearnMoreLink';
 import { getPrimaryKeysFromTable } from './utils';
 import { RESET } from '../TableModify/ModifyActions';
 import {
@@ -78,7 +80,7 @@ import {
   dataSource,
   isFeatureSupported,
 } from '../../../../dataSources';
-import KnowMoreLink from '../../../Common/KnowMoreLink/KnowMoreLink';
+
 import {
   getFilterQueries,
   replaceLegacyOperators,
@@ -99,6 +101,17 @@ import {
   getPermissionsModalTitle,
   getPermissionsModalDescription,
 } from './RootFieldPermissions/PermissionsConfirmationModal.utils';
+import {
+  FeatureFlagToast,
+  useFeatureFlags,
+  availableFeatureFlagIds,
+  FeatureFlagFloatingButton,
+} from '../../../../features/FeatureFlags';
+import { PermissionsTab } from '../../../../features/Permissions/PermissionsTab';
+import {
+  MetadataSelectors,
+  useMetadata,
+} from '../../../../features/hasura-metadata-api';
 
 const getPermissionModalEnabled = () => {
   const status = getLSItem(LS_KEYS.permissionConfirmationModalStatus);
@@ -593,7 +606,12 @@ class Permissions extends Component {
         sectionClasses += ' ' + styles.disabled;
       }
 
-      const getSectionHeader = (title, toolTip, sectionStatus, knowMoreRef) => {
+      const getSectionHeader = (
+        title,
+        toolTip,
+        sectionStatus,
+        learnMoreRef
+      ) => {
         let sectionStatusHtml;
         if (sectionStatus) {
           sectionStatusHtml = (
@@ -603,20 +621,16 @@ class Permissions extends Component {
           );
         }
 
-        let knowMoreHtml;
-        if (knowMoreRef) {
-          knowMoreHtml = (
-            <span
-              className={`${styles.add_mar_left_small} ${styles.sectionStatus}`}
-            >
-              <KnowMoreLink href={knowMoreRef} />
-            </span>
+        let learnMoreHtml;
+        if (learnMoreRef) {
+          learnMoreHtml = (
+            <LearnMoreLink href={learnMoreRef} className="font-normal" />
           );
         }
 
         return (
           <div className="flex">
-            {addTooltip(title, toolTip)} {knowMoreHtml} {sectionStatusHtml}
+            {addTooltip(title, toolTip)} {learnMoreHtml} {sectionStatusHtml}
           </div>
         );
       };
@@ -1963,39 +1977,57 @@ class Permissions extends Component {
     const supportedQueryTypes =
       dataSource.getTableSupportedQueries(currentTableSchema);
 
+    const table = {
+      name: this.props.tableName,
+      [this.props.isBigQuery ? 'dataset' : 'schema']: this.props.currentSchema,
+    };
+
     return (
-      <RightContainer>
-        <Analytics name="Permissions" {...REDACT_EVERYTHING}>
-          <div className={styles.container}>
-            {getHeader(currentTableSchema)}
-            <br />
-            <div className={styles.padd_left_remove}>
-              <div className={`${styles.padd_remove} col-xs-12`}>
-                <h4 className={styles.subheading_text}>Permissions</h4>
-                {getPermissionsTable(
-                  currentTableSchema,
-                  supportedQueryTypes,
-                  allRoles
-                )}
-                {getBulkSection(currentTableSchema)}
-                {getEditSection(
-                  currentTableSchema,
-                  supportedQueryTypes,
-                  allRoles
-                )}
-              </div>
-            </div>
-            <div className={`${styles.fixed} hidden`}>
-              {getAlertHtml(
-                ongoingRequest,
-                lastError,
-                lastSuccess,
-                lastFormError
+      <>
+        <RightContainer>
+          <Analytics name="Permissions" {...REDACT_EVERYTHING}>
+            <div className={clsx(styles.container, 'bootstrap-jail')}>
+              {getHeader(currentTableSchema)}
+              <br />
+              {this.props.showNewUI ? (
+                <PermissionsTab
+                  dataSourceName={this.props.currentSource}
+                  table={table}
+                />
+              ) : (
+                <>
+                  <div className={styles.padd_left_remove}>
+                    <div className={`${styles.padd_remove} col-xs-12`}>
+                      <h4 className={styles.subheading_text}>Permissions</h4>
+                      {getPermissionsTable(
+                        currentTableSchema,
+                        supportedQueryTypes,
+                        allRoles
+                      )}
+                      {getBulkSection(currentTableSchema)}
+                      {getEditSection(
+                        currentTableSchema,
+                        supportedQueryTypes,
+                        allRoles
+                      )}
+                    </div>
+                  </div>
+                  <div className={`${styles.fixed} hidden`}>
+                    {getAlertHtml(
+                      ongoingRequest,
+                      lastError,
+                      lastSuccess,
+                      lastFormError
+                    )}
+                  </div>
+                </>
               )}
             </div>
-          </div>
-        </Analytics>
-      </RightContainer>
+          </Analytics>
+        </RightContainer>
+        <FeatureFlagToast flagId={availableFeatureFlagIds.permissionsNewUI} />
+        <FeatureFlagFloatingButton />
+      </>
     );
   }
 }
@@ -2033,6 +2065,35 @@ const mapStateToProps = (state, ownProps) => ({
   ...state.tables.modify,
 });
 
-const permissionsConnector = connect => connect(mapStateToProps)(Permissions);
+const PermissionsWrapper = props => {
+  const { data: featureFlagsData, isLoading: isFeatureFlagsLoading } =
+    useFeatureFlags();
+
+  const { data: source, isLoading: isLoadingMetadata } = useMetadata(
+    MetadataSelectors.findSource(props.currentSource)
+  );
+  const isBigQuery = source?.kind === 'bigquery';
+
+  if (isFeatureFlagsLoading || isLoadingMetadata) return <div>Loading...</div>;
+
+  const newPermissionsTabIsEnabled =
+    featureFlagsData &&
+    featureFlagsData?.length > 0 &&
+    featureFlagsData.find(
+      featureFlag => featureFlag.id === availableFeatureFlagIds.permissionsNewUI
+    )?.state?.enabled;
+
+  return (
+    <Permissions
+      {...props}
+      showNewUI={newPermissionsTabIsEnabled}
+      isBigQuery={isBigQuery}
+    />
+  );
+};
+
+const permissionsConnector = connect => {
+  return connect(mapStateToProps)(PermissionsWrapper);
+};
 
 export default permissionsConnector;

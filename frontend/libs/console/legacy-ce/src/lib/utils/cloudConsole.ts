@@ -1,5 +1,5 @@
-import globals from '@/Globals';
-import type { LuxFeature } from '@/Globals';
+import globals from '../Globals';
+import type { LuxFeature } from '../Globals';
 
 /*
  * This function returns true only if the current context is Hasura Cloud
@@ -8,6 +8,10 @@ import type { LuxFeature } from '@/Globals';
  * */
 export function isCloudConsole(g: typeof globals) {
   return !!g.hasuraCloudTenantId && g.consoleType === 'cloud';
+}
+
+export function isEECloud(g: typeof globals) {
+  return !g.hasuraCloudTenantId && g.consoleType === 'cloud';
 }
 
 //  This function returns true if the current user has access to a lux feature

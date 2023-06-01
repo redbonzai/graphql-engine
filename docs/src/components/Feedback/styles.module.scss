@@ -21,7 +21,6 @@
   }
 }
 
-
 .feedback {
   height: 100%;
   padding: 20px;
@@ -75,6 +74,7 @@ html[data-theme='dark'] {
   text-align: center;
 
   h3 {
+    font-size: 1.25rem;
     color: var(--ifm-heading-color);
     margin-bottom: 0.5rem;
   }
@@ -128,7 +128,6 @@ html[data-theme='dark'] {
 
 html[data-theme='dark'] {
   .feedback {
-
     input,
     textarea {
       background-color: var(--color-gray-74);
@@ -144,28 +143,20 @@ html[data-theme='dark'] {
 }
 
 .successMessage {
-  display: block;
+  display: grid;
   place-items: center center;
   width: 100%;
   text-align: center;
-  color: var(--ifm-color-primary);
-  font-size: 1.1rem;
   font-weight: 500;
   font-family: var(--ifm-font-family-base);
   p {
     margin-bottom: 0 !important;
   }
 }
-html[data-theme='dark'] {
-  .successMessage {
-    color: var(--ifm-color-primary-lighter);
-  }
-}
-
 
 .errorText {
   color: var(--ifm-color-primary);
-  margin-top: .8rem;
+  margin-top: 0.8rem;
   margin-bottom: 1rem;
   font-weight: 500;
   font-size: 1.1rem;
@@ -181,12 +172,12 @@ html[data-theme='dark'] {
 }
 
 .buttonContainer {
-    display: flex;
-    justify-content: flex-end;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .star {
-  transition: .1s ease-out;
+  transition: 0.1s ease-out;
   cursor: pointer;
   &:hover {
     transform: translateY(-3px) scale(1.1);

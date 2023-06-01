@@ -1,13 +1,9 @@
-import { Table } from '@/features/hasura-metadata-types';
+import { Table } from '../../../../hasura-metadata-types';
 import {
   addConstraintName,
   filterTableRelationships,
-  removeExistingRelationships,
 } from './useSuggestedRelationships';
-import {
-  LocalRelationship,
-  SuggestedRelationship,
-} from '@/features/DatabaseRelationships/types';
+import { SuggestedRelationship } from '../../../types';
 
 describe('filterTableRelationships', () => {
   it('filters relationships', () => {
@@ -43,107 +39,92 @@ describe('filterTableRelationships', () => {
   });
 });
 
-describe('removeExistingRelationships', () => {
-  it('removes existing relationships', () => {
-    const relationships: SuggestedRelationship[] = [
-      {
-        type: 'object',
-        from: {
-          table: ['Album'],
-          columns: ['ArtistId'],
-        },
-        to: {
-          table: ['Artist'],
-          columns: ['ArtistId'],
-        },
-      },
-      {
-        type: 'object',
-        from: {
-          table: ['Genre'],
-          columns: ['GenreId'],
-        },
-        to: {
-          table: ['Artist'],
-          columns: ['GenreId'],
-        },
-      },
-    ];
-    const existingRelationships: LocalRelationship[] = [
-      {
-        type: 'localRelationship',
-        relationshipType: 'Object',
-        definition: {
-          toTable: ['Artist'],
-          mapping: {
-            GenreId: 'GenreId',
+describe('addConstraintName', () => {
+  describe('when the naming convention is hasura-default', () => {
+    it('adds the constraint name', () => {
+      const relationships: SuggestedRelationship[] = [
+        {
+          type: 'object',
+          from: {
+            table: ['Album'],
+            columns: ['ArtistId'],
+          },
+          to: {
+            table: ['Artist'],
+            columns: ['ArtistId'],
           },
         },
-        fromSource: 'dataSource',
-        fromTable: ['Genre'],
-        name: 'aName',
-      },
-    ];
+        {
+          type: 'array',
+          from: {
+            table: ['Genre'],
+            columns: ['GenreId'],
+          },
+          to: {
+            table: ['Artist'],
+            columns: ['GenreId'],
+          },
+        },
+      ];
 
-    expect(
-      removeExistingRelationships({
-        relationships,
-        existingRelationships,
-      })
-    ).toEqual([
-      {
-        type: 'object',
-        from: {
-          table: ['Album'],
-          columns: ['ArtistId'],
+      const expected = [
+        {
+          ...relationships[0],
+          constraintName: 'Album_Artist',
         },
-        to: {
-          table: ['Artist'],
-          columns: ['ArtistId'],
+        {
+          ...relationships[1],
+          constraintName: 'Genre_Artists',
         },
-      },
-    ]);
+      ];
+
+      expect(addConstraintName(relationships, 'hasura-default')).toEqual(
+        expected
+      );
+    });
   });
-});
 
-describe('addConstraintName', () => {
-  it('adds the constraint name', () => {
-    const relationships: SuggestedRelationship[] = [
-      {
-        type: 'object',
-        from: {
-          table: ['Album'],
-          columns: ['ArtistId'],
+  describe('when the naming convention is graphql-default', () => {
+    it('adds the constraint name', () => {
+      const relationships: SuggestedRelationship[] = [
+        {
+          type: 'object',
+          from: {
+            table: ['Album'],
+            columns: ['ArtistId'],
+          },
+          to: {
+            table: ['Artist'],
+            columns: ['ArtistId'],
+          },
         },
-        to: {
-          table: ['Artist'],
-          columns: ['ArtistId'],
+        {
+          type: 'array',
+          from: {
+            table: ['Genre'],
+            columns: ['GenreId'],
+          },
+          to: {
+            table: ['Artist'],
+            columns: ['GenreId'],
+          },
         },
-      },
-      {
-        type: 'array',
-        from: {
-          table: ['Genre'],
-          columns: ['GenreId'],
-        },
-        to: {
-          table: ['Artist'],
-          columns: ['GenreId'],
-        },
-      },
-    ];
+      ];
 
-    const expected = [
-      {
-        ...relationships[0],
-        constraintName: 'ArtistId_Artist_ArtistId',
-      },
-      {
-        ...relationships[1],
-        constraintName: 'GenreId_Artists_GenreId',
-      },
-    ];
+      const expected = [
+        {
+          ...relationships[0],
+          constraintName: 'albumArtist',
+        },
+        {
+          ...relationships[1],
+          constraintName: 'genreArtists',
+        },
+      ];
 
-    expect(addConstraintName(relationships)).toEqual(expected);
+      expect(addConstraintName(relationships, 'graphql-default')).toEqual(
+        expected
+      );
+    });
   });
 });

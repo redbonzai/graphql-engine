@@ -1,5 +1,5 @@
-import { isJsonString } from '@/components/Common/utils/jsUtils';
-import { CronTrigger, RequestTransform } from '@/metadata/types';
+import { isJsonString } from '../../../../components/Common/utils/jsUtils';
+import { CronTrigger, RequestTransform } from '../../../../metadata/types';
 import { Schema } from './schema';
 
 /**
@@ -28,6 +28,7 @@ const transformFormData = (
       num_retries: Number(values.num_retries),
       retry_interval_seconds: Number(values.retry_interval_seconds),
       timeout_seconds: Number(values.timeout_seconds),
+      tolerance_seconds: Number(values.tolerance_seconds),
     },
     include_in_metadata: values.include_in_metadata,
     comment: values.comment,

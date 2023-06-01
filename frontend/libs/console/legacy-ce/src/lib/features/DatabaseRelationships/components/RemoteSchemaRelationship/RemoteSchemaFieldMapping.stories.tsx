@@ -1,9 +1,9 @@
-import { useConsoleForm } from '@/new-components/Form';
+import { useConsoleForm } from '../../../../new-components/Form';
 import { z } from 'zod';
 import { Controller } from 'react-hook-form';
-import { Button } from '@/new-components/Button';
-import { ReactQueryDecorator } from '@/storybook/decorators/react-query';
-import { ComponentStory, ComponentMeta } from '@storybook/react';
+import { Button } from '../../../../new-components/Button';
+import { ReactQueryDecorator } from '../../../../storybook/decorators/react-query';
+import { StoryFn, Meta } from '@storybook/react';
 import { RemoteSchemaFieldMapping } from './RemoteSchemaFieldMapping';
 import { useRemoteSchemaIntrospection } from '../../hooks/useRemoteSchema';
 import { handlers } from '../../handler.mock';
@@ -14,9 +14,9 @@ export default {
   parameters: {
     msw: handlers(),
   },
-} as ComponentMeta<typeof RemoteSchemaFieldMapping>;
+} as Meta<typeof RemoteSchemaFieldMapping>;
 
-export const StandaloneComponent: ComponentStory<
+export const StandaloneComponent: StoryFn<
   typeof RemoteSchemaFieldMapping
 > = () => {
   const { data: remoteSchemaGraphQLSchema, isLoading } =
@@ -38,7 +38,7 @@ export const StandaloneComponent: ComponentStory<
   );
 };
 
-export const WithReactHookForm: ComponentStory<
+export const WithReactHookForm: StoryFn<
   typeof RemoteSchemaFieldMapping
 > = () => {
   const { data: remoteSchemaGraphQLSchema, isLoading } =

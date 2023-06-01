@@ -1,35 +1,29 @@
-import { GraphQLSchema } from 'graphql';
+import isEqual from 'lodash/isEqual';
 
-import isEqual from 'lodash.isequal';
+import { TableColumn } from '../../../../../../DataSource';
+import { getTypeName } from '../../../../../../GraphQLUtils';
 
-import { TableColumn } from '@/features/DataSource';
-import { getTypeName } from '@/features/GraphQLUtils';
-
-import { Metadata } from '@/features/hasura-metadata-types';
+import { Metadata } from '../../../../../../hasura-metadata-types';
 
 import { PermissionsSchema } from '../../../../../schema';
 
 import type { QueryType } from '../../../../../types';
+import { SourceCustomization } from '../../../../../../hasura-metadata-types/source/source';
+import { Operator } from '../../../../../../DataSource/types';
+
 import {
-  createPermissionsObject,
-  getRowPermissionsForAllOtherQueriesMatchingSelectedRole,
-} from './utils';
+  MetadataDataSource,
+  TableEntry,
+} from '../../../../../../../metadata/types';
+
+import { createPermissionsObject } from './utils';
 
 interface GetMetadataTableArgs {
-  dataSourceName: string;
   table: unknown;
-  metadata: Metadata;
+  trackedTables: TableEntry[] | undefined;
 }
 
-const getMetadataTable = ({
-  dataSourceName,
-  table,
-  metadata,
-}: GetMetadataTableArgs) => {
-  const trackedTables = metadata.metadata?.sources?.find(
-    source => source.name === dataSourceName
-  )?.tables;
-
+const getMetadataTable = ({ table, trackedTables }: GetMetadataTableArgs) => {
   // find selected table
   const currentTable = trackedTables?.find(trackedTable =>
     isEqual(trackedTable.table, table)
@@ -38,68 +32,55 @@ const getMetadataTable = ({
   return currentTable;
 };
 
-interface Args {
+export interface CreateDefaultValuesArgs {
   queryType: QueryType;
   roleName: string;
   table: unknown;
   dataSourceName: string;
   metadata: Metadata;
   tableColumns: TableColumn[];
-  schema: GraphQLSchema;
   defaultQueryRoot: string | never[];
+  metadataSource: MetadataDataSource | undefined;
+  supportedOperators: Operator[];
 }
 
 export const createDefaultValues = ({
   queryType,
   roleName,
   table,
-  dataSourceName,
-  metadata,
   tableColumns,
-  schema,
   defaultQueryRoot,
-}: Args) => {
+  metadataSource,
+  supportedOperators,
+}: CreateDefaultValuesArgs) => {
   const selectedTable = getMetadataTable({
-    dataSourceName,
     table,
-    metadata,
+    trackedTables: metadataSource?.tables,
   });
-
-  const metadataSource = metadata.metadata.sources.find(
-    s => s.name === dataSourceName
-  );
-
-  /**
-   * This is GDC specific, we have to move this to DAL later
-   */
 
   const tableName = getTypeName({
     defaultQueryRoot,
     operation: 'select',
-    sourceCustomization: metadataSource?.customization,
+    sourceCustomization: metadataSource?.customization as SourceCustomization,
     configuration: selectedTable?.configuration,
   });
-
-  const allRowChecks = getRowPermissionsForAllOtherQueriesMatchingSelectedRole(
-    queryType,
-    roleName,
-    selectedTable
-  );
 
   const baseDefaultValues: DefaultValues = {
     queryType: 'select',
     filterType: 'none',
     columns: {},
-    allRowChecks,
+
+    supportedOperators,
   };
+
   if (selectedTable) {
     const permissionsObject = createPermissionsObject({
       queryType,
       selectedTable,
       roleName,
       tableColumns,
-      schema,
       tableName,
+      metadataSource,
     });
 
     return { ...baseDefaultValues, ...permissionsObject };
@@ -109,6 +90,5 @@ export const createDefaultValues = ({
 };
 
 type DefaultValues = PermissionsSchema & {
-  allRowChecks: { queryType: QueryType; value: string }[];
   operators?: Record<string, unknown>;
 };

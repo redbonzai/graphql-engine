@@ -13,7 +13,7 @@ The SQLite agent currently supports the following capabilities:
 * [x] Aggregations
 * [x] Prometheus Metrics
 * [x] Exposing Foreign-Key Information
-* [ ] Mutations
+* [x] Mutations
 * [ ] Subscriptions
 * [ ] Streaming Subscriptions
 
@@ -53,7 +53,7 @@ You will want to mount a volume with your database(s) so that they can be refere
 
 ## Options / Environment Variables
 
-Note: Boolean flags `{FLAG}` can be provided as `1`, `true`, `yes`, or omitted and default to `false`.
+Note: Boolean flags `{FLAG}` can be provided as `1`, `true`, `t`, `yes`, `y`, or omitted and default to `false`.
 
 | ENV Variable Name | Format | Default | Info |
 | --- | --- | --- | --- |
@@ -72,6 +72,7 @@ Note: Boolean flags `{FLAG}` can be provided as `1`, `true`, `yes`, or omitted a
 | `DATASET_DELETE` | `{FLAG}` | `false` | Enable `DELETE /datasets/:name` |
 | `DATASET_TEMPLATES` | `DIRECTORY` | `./dataset_templates` | Directory to clone datasets from. |
 | `DATASET_CLONES` | `DIRECTORY` | `./dataset_clones` | Directory to clone datasets to. |
+| `MUTATIONS` | `{FLAG}` | `false` | Enable Mutation Support. |
 
 
 ## Agent usage
@@ -109,24 +110,29 @@ Datasets support is enabled via the ENV variables:
 * `DATASET_TEMPLATES`
 * `DATASET_CLONES`
 
-Templates will be looked up at `${DATASET_TEMPLATES}/${template_name}.db`.
+Templates will be looked up at `${DATASET_TEMPLATES}/${template_name}.sqlite` or `${DATASET_TEMPLATES}/${template_name}.sql`. The `.sqlite` templates are just SQLite database files that will be copied as a clone. The `.sql` templates are SQL script files that will be run against a blank SQLite database in order to create a clone.
 
-Clones will be copied to `${DATASET_CLONES}/${clone_name}.db`.
+Clones will be copied to `${DATASET_CLONES}/${clone_name}.sqlite`.
 
 ## Testing Changes to the Agent
 
-Run:
+Ensure you run the agent with `DATASETS=1 DATASET_DELETE=1 MUTATIONS=1` in order to enable testing of mutations.
+
+Then run:
 
 ```sh
-cabal run dc-api:test:tests-dc-api -- test --agent-base-url http://localhost:8100 --agent-config '{"db": "db.chinook2.sqlite"}'
+cabal run dc-api:test:tests-dc-api -- test --agent-base-url http://localhost:8100 sandwich --tui
 ```
 
 From the HGE repo.
 
+## Known Issues
+* Using "returning" in insert/update/delete mutations where you join across relationships that are affected by the insert/update/delete mutation itself may return inconsistent results. This is because of this issue with SQLite: https://sqlite.org/forum/forumpost/9470611066
+
 ## TODO
 
 * [x] Prometheus metrics hosted at `/metrics`
-* [ ] Pull reference types from a package rather than checked-in files
+* [x] Pull reference types from a package rather than checked-in files
 * [x] Health Check
 * [x] DB Specific Health Checks
 * [x] Schema
@@ -157,4 +163,5 @@ From the HGE repo.
 * [x] Reuse `find_table_relationship` in more scenarios
 * [x] ORDER clause in aggregates breaks SQLite parser for some reason
 * [x] Check that looped exist check doesn't cause name conflicts
-* [ ] `NOT EXISTS IS NULL` != `EXISTS IS NOT NULL`, Example:
+* [x] `NOT EXISTS IS NULL` != `EXISTS IS NOT NULL`
+* [x] Mutation support

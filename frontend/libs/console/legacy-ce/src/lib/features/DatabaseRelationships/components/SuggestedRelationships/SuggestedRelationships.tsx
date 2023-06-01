@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { capitaliseFirstLetter } from '@/components/Common/ConfigureTransformation/utils';
-import { Table } from '@/features/hasura-metadata-types';
-import { Button } from '@/new-components/Button';
-import { CardedTable } from '@/new-components/CardedTable';
-import { useFireNotification } from '@/new-components/Notifications';
+import { capitaliseFirstLetter } from '../../../../components/Common/ConfigureTransformation/utils';
+import { Table } from '../../../hasura-metadata-types';
+import { Button } from '../../../../new-components/Button';
+import { CardedTable } from '../../../../new-components/CardedTable';
 import {
   FaArrowRight,
   FaColumns,
@@ -11,18 +10,17 @@ import {
   FaMagic,
   FaTable,
 } from 'react-icons/fa';
-import { MetadataSelectors, useMetadata } from '@/features/hasura-metadata-api';
-import { getSupportsForeignKeys } from '@/features/hasura-metadata-api/utils';
+import { MetadataSelectors, useMetadata } from '../../../hasura-metadata-api';
+import { getSupportsForeignKeys } from '../../../hasura-metadata-api/utils';
 import { useListAllDatabaseRelationships } from '../../hooks/useListAllDatabaseRelationships';
-import { useManageLocalRelationship } from '../../hooks/useManageLocalRelationship';
 import { getTableDisplayName } from '../../utils/helpers';
 import {
   SuggestedRelationshipWithName,
   useSuggestedRelationships,
 } from './hooks/useSuggestedRelationships';
-import { convertSuggestedRelationShipToLocalRelationship } from './SuggestedRelationships.utils';
 import type { LocalRelationship } from '../../types';
 import Skeleton from 'react-loading-skeleton';
+import { SuggestedRelationshipTrackModal } from '../SuggestedRelationshipTrackModal/SuggestedRelationshipTrackModal';
 
 type SuggestedRelationshipsProps = {
   dataSourceName: string;
@@ -37,7 +35,6 @@ export const SuggestedRelationships = ({
     dataSourceName,
     table,
   });
-
   const localRelationships = existingRelationships.filter(rel => {
     if (rel.type === 'localRelationship') {
       return true;
@@ -59,74 +56,42 @@ export const SuggestedRelationships = ({
       isEnabled: supportsForeignKeys,
     });
 
-  const { fireNotification } = useFireNotification();
+  const [isModalVisible, setModalVisible] = useState(false);
+  const [selectedRelationship, setSelectedRelationship] =
+    useState<SuggestedRelationshipWithName | null>(null);
 
-  const { createRelationship, isLoading: isCreatingRelationship } =
-    useManageLocalRelationship({
-      dataSourceName,
-      onSuccess: () => {
-        fireNotification({
-          title: 'Success',
-          message: 'Relationship tracked',
-          type: 'success',
-        });
-      },
-      onError: () => {
-        fireNotification({
-          title: 'Error',
-          message: 'An error occurred',
-          type: 'error',
-        });
-      },
-    });
-
-  const [updatedRelationship, setUpdatedRelationship] = useState<string | null>(
-    null
-  );
-  const onCreate = (relationship: SuggestedRelationshipWithName) => {
-    setUpdatedRelationship(relationship.constraintName);
-    createRelationship(
-      convertSuggestedRelationShipToLocalRelationship(
-        dataSourceName,
-        relationship
-      )
-    );
-  };
-
-  if (!isLoadingSuggestedRelationships)
+  if (isLoadingSuggestedRelationships)
     return <Skeleton count={4} height={30} />;
 
   return suggestedRelationships.length > 0 ? (
-    <CardedTable.Table>
-      <CardedTable.Header
-        columns={[
-          <div>
-            <FaMagic className="fill-muted" /> FOREIGN KEY RELATIONSHIPS
-          </div>,
-          'SOURCE',
-          'TYPE',
-          'RELATIONSHIP',
-        ]}
-      />
+    <>
+      <CardedTable.Table>
+        <CardedTable.Header
+          columns={[
+            <div>
+              <FaMagic className="fill-muted" /> SUGGESTED RELATIONSHIPS
+            </div>,
+            'SOURCE',
+            'TYPE',
+            'RELATIONSHIP',
+          ]}
+        />
 
-      <CardedTable.TableBody>
-        {suggestedRelationships.map(relationship => {
-          const relationshipName = relationship.constraintName;
-          return (
-            <CardedTable.TableBodyRow key={relationshipName}>
+        <CardedTable.TableBody>
+          {suggestedRelationships.map(relationship => (
+            <CardedTable.TableBodyRow key={relationship.constraintName}>
               <CardedTable.TableBodyCell>
                 <div className="flex flex-row items-center">
                   <Button
                     size="sm"
-                    onClick={() => onCreate(relationship)}
-                    isLoading={
-                      isCreatingRelationship &&
-                      updatedRelationship === relationship.constraintName
-                    }
+                    onClick={() => {
+                      setSelectedRelationship(relationship);
+                      setModalVisible(true);
+                    }}
                   >
                     Add
                   </Button>
-                  <div className="ml-2">{relationshipName}</div>
+                  <div className="ml-2">{relationship.constraintName}</div>
                 </div>
               </CardedTable.TableBodyCell>
 
@@ -156,9 +121,16 @@ export const SuggestedRelationships = ({
                 </div>
               </CardedTable.TableBodyCell>
             </CardedTable.TableBodyRow>
-          );
-        })}
-      </CardedTable.TableBody>
-    </CardedTable.Table>
+          ))}
+        </CardedTable.TableBody>
+      </CardedTable.Table>
+      {isModalVisible && selectedRelationship && (
+        <SuggestedRelationshipTrackModal
+          relationship={selectedRelationship}
+          dataSourceName={dataSourceName}
+          onClose={() => setModalVisible(false)}
+        />
+      )}
+    </>
   ) : null;
 };

@@ -1,16 +1,16 @@
 import React from 'react';
 
-import { ComponentStory, ComponentMeta } from '@storybook/react';
-import { ReactQueryDecorator } from '@/storybook/decorators/react-query';
+import { StoryFn, Meta } from '@storybook/react';
+import { ReactQueryDecorator } from '../../../../storybook/decorators/react-query';
 
 import { Widget } from './Widget';
 
 export default {
   component: Widget,
   decorators: [ReactQueryDecorator()],
-} as ComponentMeta<typeof Widget>;
+} as Meta<typeof Widget>;
 
-export const Primary: ComponentStory<typeof Widget> = () => (
+export const Primary: StoryFn<typeof Widget> = () => (
   <Widget
     table={{ name: 'customers', schema: 'sales' }}
     dataSourceName="bikes"

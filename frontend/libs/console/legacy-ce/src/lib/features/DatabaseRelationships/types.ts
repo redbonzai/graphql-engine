@@ -1,4 +1,4 @@
-import { Table } from '@/features/hasura-metadata-types';
+import { Table } from '../hasura-metadata-types';
 
 type BasicRelationshipDetails = {
   name: string;
@@ -31,6 +31,9 @@ export type LocalRelationship = BasicRelationshipDetails & {
   relationshipType: 'Array' | 'Object';
   definition: {
     toTable: Table;
+    toColumns?: string[];
+    fromTable?: Table;
+    fromColumns?: string[];
     mapping: Record<string, string>;
   };
 };

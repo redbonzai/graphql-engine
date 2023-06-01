@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useMemo, useState, useCallback } from 'react';
-import globals from '@/Globals';
-import { createFetchControlPlaneData } from '@/hooks/createFetchControlPlaneData';
+import globals from '../../../../../../Globals';
+import { createFetchControlPlaneData } from '../../../../../../hooks/createFetchControlPlaneData';
 import { generateRandomString } from '../utils';
 import {
   getPersistedNeonCallbackSearch,
@@ -223,7 +223,7 @@ function generateUrlSearchParams(
   searchParams.set('response_type', 'code');
   searchParams.set(
     'scope',
-    'openid offline urn:neoncloud:projects:create urn:neoncloud:projects:read urn:neoncloud:projects:update'
+    'openid offline urn:neoncloud:projects:create urn:neoncloud:projects:read urn:neoncloud:projects:update urn:neoncloud:projects:delete'
   );
   searchParams.set('state', oauth2State);
 

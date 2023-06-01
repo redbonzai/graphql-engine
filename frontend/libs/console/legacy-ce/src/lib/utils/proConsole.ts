@@ -1,4 +1,4 @@
-import type { CloudCliEnv, EnvVars } from '@/Globals';
+import type { CloudCliEnv, EnvVars } from '../Globals';
 
 export type ProConsoleEnv = {
   consoleMode: EnvVars['consoleMode'];
@@ -7,26 +7,11 @@ export type ProConsoleEnv = {
 };
 
 export const isProConsole = (env: ProConsoleEnv) => {
-  if (
-    env.consoleMode === 'server' &&
-    (env.consoleType === 'cloud' ||
-      env.consoleType === 'pro' ||
-      env.consoleType === 'pro-lite')
-  ) {
+  if (env.consoleType === 'cloud' || env.consoleType === 'pro') {
     return true;
   }
 
-  if (env.consoleMode === 'cli') {
-    if (
-      env.consoleType === 'cloud' ||
-      env.consoleType === 'pro' ||
-      env.consoleType === 'pro-lite'
-    )
-      return true;
-
-    // to support old CLI logic, when consoleType is not provided by the CLI
-    if (env.pro === true) return true;
-  }
+  if (env.consoleMode === 'cli' && env.pro === true) return true;
 
   return false;
 };
@@ -34,6 +19,11 @@ export const isProConsole = (env: ProConsoleEnv) => {
 export const isProLiteConsole = (env: ProConsoleEnv) => {
   return env.consoleType === 'pro-lite';
 };
+
+// Commented this function so that it's not used
+// export const isProLiteConsole = (env: ProConsoleEnv) => {
+//   return env.consoleType === 'pro-lite';
+// };
 
 export const isMonitoringTabSupportedEnvironment = (env: ProConsoleEnv) => {
   // pro-lite and OSS environments won't have access to metrics server
@@ -57,4 +47,14 @@ export const isEnvironmentSupportMultiTenantConnectionPooling = (
 
   // there should not be any other console modes
   throw new Error(`Invalid consoleMode:  ${env.consoleMode}`);
+};
+
+export const isImportFromOpenAPIEnabled = isProConsole;
+export const isDynamicDBRoutingEnabled = isProConsole;
+// isProConsole or isProLiteConsole
+export const isCachingEnabled = (env: ProConsoleEnv) =>
+  isProConsole(env) || isProLiteConsole(env);
+
+export const isEEClassicConsole = () => {
+  return window.__env.eeMode || false;
 };

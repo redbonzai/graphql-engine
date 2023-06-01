@@ -1,7 +1,7 @@
 /* eslint-disable no-underscore-dangle */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { getScalarType, getTypeName } from '@/features/GraphQLUtils';
-import { areTablesEqual } from '@/features/hasura-metadata-api';
+import { getScalarType, getTypeName } from '../../../GraphQLUtils';
+import { areTablesEqual } from '../../../hasura-metadata-api';
 import { GraphQLType } from 'graphql';
 import { CitusTable } from '..';
 import {
@@ -50,6 +50,7 @@ export const getTableColumns = async ({
       kind: 'citus',
     },
     sql,
+    readOnly: true,
     httpClient,
   });
 
@@ -106,6 +107,7 @@ export const getTableColumns = async ({
       kind: 'postgres',
     },
     sql: primaryKeySql,
+    readOnly: true,
     httpClient,
   });
 

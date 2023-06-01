@@ -1,10 +1,10 @@
-import type { Metadata } from '@/features/hasura-metadata-types';
+import type { Metadata } from '../../../hasura-metadata-types';
 
-import { parseOpenTelemetry } from '@/features/hasura-metadata-types';
+import { parseOpenTelemetry } from '../../../hasura-metadata-types';
 import {
   programmaticallyTraceError,
   trackCustomEvent,
-} from '@/features/Analytics';
+} from '../../../Analytics';
 
 /**
  * Parse the OpenTelemetry config stored in metadata. There are two possibilities where server's
@@ -58,11 +58,8 @@ export function useTrackTypeMisalignments(
     }
   );
 
-  programmaticallyTraceError(
-    new Error(
-      'OpenTelemetry metadata not parsed',
-      // @ts-expect-error This error will automatically disappear with Nx that targets new browsers by default
-      { cause: result.error }
-    )
-  );
+  programmaticallyTraceError({
+    error: 'OpenTelemetry metadata not parsed',
+    cause: result.error,
+  });
 }

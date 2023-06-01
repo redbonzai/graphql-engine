@@ -1,18 +1,20 @@
 import { useQueryClient } from 'react-query';
 import { AxiosInstance } from 'axios';
 
-import { useMetadataMigration } from '@/features/MetadataAPI';
-import { exportMetadata } from '@/features/DataSource';
-import { useHttpClient } from '@/features/Network';
-import { useFireNotification } from '@/new-components/Notifications';
+import { useMetadataMigration } from '../../../../MetadataAPI';
+import { exportMetadata } from '../../../../DataSource';
+import { useHttpClient } from '../../../../Network';
+import { useFireNotification } from '../../../../../new-components/Notifications';
 import { AccessType, QueryType } from '../../../types';
 import { api } from '../../api';
 import { isPermission, keyToPermission } from '../../../utils';
 import { PermissionsSchema } from '../../../schema';
+import { Table } from '../../../../hasura-metadata-types';
 
 export interface UseSubmitFormArgs {
   dataSourceName: string;
-  table: unknown;
+  table: Table;
+  tables: Table[];
   roleName: string;
   queryType: QueryType;
   accessType: AccessType;
@@ -21,7 +23,7 @@ export interface UseSubmitFormArgs {
 interface ExistingPermissions {
   role: string;
   queryType: QueryType;
-  table: unknown;
+  table: Table;
 }
 
 interface GetAllPermissionsArgs {
@@ -62,7 +64,8 @@ const getAllPermissions = async ({
 };
 
 export const useSubmitForm = (args: UseSubmitFormArgs) => {
-  const { dataSourceName, table, roleName, queryType, accessType } = args;
+  const { dataSourceName, table, roleName, queryType, accessType, tables } =
+    args;
 
   const queryClient = useQueryClient();
   const httpClient = useHttpClient();
@@ -72,7 +75,9 @@ export const useSubmitForm = (args: UseSubmitFormArgs) => {
   const mutate = useMetadataMigration();
 
   const submit = async (formData: PermissionsSchema) => {
-    const { metadata, resource_version } = await exportMetadata({ httpClient });
+    const { metadata, resource_version } = await exportMetadata({
+      httpClient,
+    });
 
     const metadataSource = metadata?.sources.find(
       s => s.name === dataSourceName
@@ -92,14 +97,14 @@ export const useSubmitForm = (args: UseSubmitFormArgs) => {
       dataSourceName,
       driver: metadataSource.kind,
       table,
-      roleName,
+      tables,
+      role: roleName,
       queryType,
       accessType,
       resourceVersion: resource_version,
       formData,
-      existingPermissions,
+      existingPermissions: existingPermissions ?? [],
     });
-
     await mutate.mutateAsync(
       {
         query: body,
@@ -110,6 +115,9 @@ export const useSubmitForm = (args: UseSubmitFormArgs) => {
             type: 'success',
             title: 'Success!',
             message: 'Permissions saved successfully!',
+          });
+          exportMetadata({
+            httpClient,
           });
         },
         onError: err => {

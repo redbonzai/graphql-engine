@@ -1,7 +1,7 @@
 import type { Moment } from 'moment';
 
-import type { OpenTelemetry } from '@/features/hasura-metadata-types';
-import type { KeyValuePair } from '@/components/Common/ConfigureTransformation/stateDefaults';
+import type { OpenTelemetry } from '../features/hasura-metadata-types';
+import type { KeyValuePair } from '../components/Common/ConfigureTransformation/stateDefaults';
 
 import type { Driver } from '../dataSources';
 import type { Nullable } from './../components/Common/utils/tsUtils';
@@ -1157,11 +1157,14 @@ type GraphQLCustomizationMetadata = {
 };
 
 // Used for Dynamic Connection Routing
-type ConnectionSet = {
+export type ConnectionSet = {
   connection_info: SourceConnectionInfo;
   name: string;
 };
 
+export type SourceConnectionTemplate = {
+  template: string | null;
+};
 export interface MetadataDataSource {
   name: string;
   kind:
@@ -1177,6 +1180,7 @@ export interface MetadataDataSource {
     extensions_schema?: string;
     // pro-only feature
     read_replicas?: SourceConnectionInfo[];
+    connection_template?: SourceConnectionTemplate;
     connection_set?: ConnectionSet[];
     service_account?: BigQueryServiceAccount;
     global_select_limit?: number;

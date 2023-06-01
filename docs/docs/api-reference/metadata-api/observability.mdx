@@ -1,24 +1,28 @@
 ---
 sidebar_label: Observability Options
-sidebar_position: 20
+sidebar_position: 24
 description: Manage observability options with the Hasura metadata API
 keywords:
-   - hasura
-   - docs
-   - metadata API
-   - API reference
-   - observability options
-   - opentelemetry
-   - open telemetry
-   - traces
-   - tracing
-   - metrics config
-   - monitoring
-   - enterprise
-   - ee
+  - hasura
+  - docs
+  - metadata API
+  - API reference
+  - observability options
+  - opentelemetry
+  - open telemetry
+  - traces
+  - tracing
+  - metrics config
+  - monitoring
+  - enterprise
+  - ee
 ---
 
+import ProductBadge from '@site/src/components/ProductBadge';
+
 # Metadata API Reference: Observability Options
+
+<ProductBadge ce free standard pro ee self />
 
 ## Introduction
 
@@ -26,7 +30,7 @@ The API to manage `Observability` related metadata configurations.
 
 ## Logs and metrics configuration
 
-<div className='badge badge--primary heading-badge'>Available on: Cloud Standard</div>
+<ProductBadge standard pro />
 
 These are the configurations that govern the metrics and logging output for debugging and analytics.
 
@@ -41,20 +45,19 @@ X-Hasura-Role: admin
 {
     "type": "set_metrics_config",
     "args": {
-        "analyze_query_variables": false    
+        "analyze_query_variables": false
     }
 }
 ```
 
 ### Args syntax {#set-metrics-config-syntax}
 
-| Key                     | Required | Schema    | Description                                                                                         |
-|-------------------------|----------|-----------|-----------------------------------------------------------------------------------------------------|
-| analyze_query_variables | false    | boolean   | Enables logging of the values of the query variables provided for each request. Default is `false`. |
+| Key                     | Required | Schema  | Description                                                                                         |
+| ----------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------- |
+| analyze_query_variables | false    | boolean | Enables logging of the values of the query variables provided for each request. Default is `false`. |
 
 Please see the corresponding
 [feature documentation for the usage of these configurations](/observability/operations.mdx#capture-query-variables).
-
 
 ## remove_metrics_config {#metadata-remove-metrics-config}
 
@@ -72,10 +75,10 @@ X-Hasura-Role: admin
 
 ## OpenTelemetry Configuration
 
-<div className='badge badge--primary heading-badge'>Available on: Enterprise Edition only</div>
+<ProductBadge self />
 
-The OpenTelemetry configuration enables export of [distributed traces](/observability/tracing.mdx) 
-to an [OpenTelemetry](https://opentelemetry.io/) compliant APM receiver.
+The OpenTelemetry configuration enables export of [distributed traces](/observability/tracing.mdx) to an
+[OpenTelemetry](https://opentelemetry.io/) compliant APM receiver.
 
 ## set_opentelemetry_config {#metadata-set-opentelemetry-config}
 
@@ -132,7 +135,7 @@ X-Hasura-Role: admin
 ### Args syntax {#set-opentelemetry-config-syntax}
 
 | Key                  | Required | Schema                                                                                             | Description                                                                                                                                                                            |
-|----------------------|----------|----------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| -------------------- | -------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | status               | false    | `String`                                                                                           | Toggle to enable or disable the export. Allowed values are `enabled` and `disabled`. Default is `disabled` (If status is not explicitely passed, then the configuration gets disabled) |
 | data_types           | false    | `[String]`                                                                                         | List of the types of observability data points to be exported. Allowed types: `traces` only                                                                                            |
 | exporter_otlp        | false    | [OTLPExporter](/api-reference/syntax-defs.mdx#otlpexporter). This is required if status is enabled | OpenTelemetry compliant receiver configuration                                                                                                                                         |

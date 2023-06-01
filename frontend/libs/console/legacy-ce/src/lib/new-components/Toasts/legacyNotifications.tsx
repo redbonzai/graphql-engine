@@ -1,8 +1,8 @@
 import React, { MouseEvent } from 'react';
 import AceEditor from 'react-ace';
 import { toast, ToastOptions } from 'react-hot-toast/headless';
-import { showModal } from '@/store/modal/modal.actions';
-import { TableTrackingCustomizationModalKey } from '@/store/modal/modal.constants';
+import { showModal } from '../../store/modal/modal.actions';
+import { TableTrackingCustomizationModalKey } from '../../store/modal/modal.constants';
 import { hasuraToast, ToastProps } from './hasuraToast';
 import { Json } from '../../components/Common/utils/tsUtils';
 
@@ -184,7 +184,6 @@ const getErrorJson = (error: Record<string, any>): string | undefined => {
 };
 
 export const getNotificationDetails = (detailsJson: Json) => {
-  console.log('detailsJson', JSON.stringify(detailsJson, null, 4));
   return (
     <div className="my-2">
       <AceEditor
@@ -209,7 +208,6 @@ const getNotificationAction = (
   errorJson: string | undefined,
   errorMessage: string
 ): Pick<ToastProps, 'button'> => {
-  console.log('errorJson', errorJson);
   if (errorJson) {
     const children = [getNotificationDetails(errorJson)];
     return {
@@ -285,7 +283,6 @@ export const showErrorNotificationLegacy = (
   if (error) {
     const errorMessage = getErrorMessage(message || '', error);
     const errorJson = getErrorJson(error);
-    console.log('errorJson', errorJson);
     toastProps = {
       ...toastProps,
       message: errorMessage,

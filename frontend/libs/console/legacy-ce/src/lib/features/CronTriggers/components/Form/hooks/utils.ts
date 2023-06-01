@@ -1,4 +1,4 @@
-import { ServerHeader } from '@/metadata/types';
+import { ServerHeader } from '../../../../../metadata/types';
 import { Schema } from '../schema';
 
 export const serverHeadersToKeyValueArray = (
@@ -42,6 +42,7 @@ export const emptyDefaultValues: Schema = {
   num_retries: '0',
   retry_interval_seconds: '10',
   timeout_seconds: '60',
+  tolerance_seconds: '21600',
   include_in_metadata: true,
   comment: '',
 };

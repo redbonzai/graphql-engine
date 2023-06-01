@@ -12,6 +12,7 @@ where
 import Autodocodec (HasCodec (codec))
 import Data.Aeson (FromJSON)
 import Data.Aeson qualified as J
+import Data.Environment qualified as Env
 import Data.Kind (Type)
 import Data.Typeable
 import Hasura.Backends.Postgres.Connection qualified as Postgres
@@ -28,16 +29,14 @@ import Hasura.Backends.Postgres.Types.Function qualified as Postgres
 import Hasura.Backends.Postgres.Types.Insert qualified as Postgres (BackendInsert)
 import Hasura.Backends.Postgres.Types.Update qualified as Postgres
 import Hasura.Base.Error
-import Hasura.NativeQuery.IR (NativeQueryImpl)
-import Hasura.NativeQuery.Metadata
 import Hasura.Prelude
 import Hasura.RQL.IR.BoolExp.AggregationPredicates qualified as Agg
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendTag
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Common (SourceName, TriggerOnReplication (..))
 import Hasura.RQL.Types.HealthCheck
 import Hasura.RQL.Types.HealthCheckImplementation (HealthCheckImplementation (..))
-import Hasura.SQL.Backend
-import Hasura.SQL.Tag
 
 --------------------------------------------------------------------------------
 -- PostgresBackend
@@ -58,20 +57,20 @@ class
   where
   type PgExtraTableMetadata pgKind :: Type
 
-  versionCheckImpl :: SourceConnConfiguration ('Postgres pgKind) -> IO (Either QErr ())
-  versionCheckImpl = const (pure $ Right ())
+  versionCheckImpl :: Env.Environment -> SourceConnConfiguration ('Postgres pgKind) -> IO (Either QErr ())
+  versionCheckImpl = const $ const (pure $ Right ())
 
-  runPingSourceImpl :: (String -> IO ()) -> SourceName -> SourceConnConfiguration ('Postgres pgKind) -> IO ()
-  runPingSourceImpl _ _ _ = pure ()
+  runPingSourceImpl :: Env.Environment -> (String -> IO ()) -> SourceName -> SourceConnConfiguration ('Postgres pgKind) -> IO ()
+  runPingSourceImpl _ _ _ _ = pure ()
 
 instance PostgresBackend 'Vanilla where
-  type PgExtraTableMetadata 'Vanilla = ()
+  type PgExtraTableMetadata 'Vanilla = Postgres.PGExtraTableMetadata
 
 instance PostgresBackend 'Citus where
   type PgExtraTableMetadata 'Citus = Citus.ExtraTableMetadata
 
 instance PostgresBackend 'Cockroach where
-  type PgExtraTableMetadata 'Cockroach = ()
+  type PgExtraTableMetadata 'Cockroach = Postgres.PGExtraTableMetadata
   versionCheckImpl = runCockroachVersionCheck
   runPingSourceImpl = runCockroachDBPing
 
@@ -89,8 +88,6 @@ instance
   where
   type BackendConfig ('Postgres pgKind) = ()
   type BackendInfo ('Postgres pgKind) = ()
-  type SourceConfig ('Postgres pgKind) = Postgres.PGSourceConfig
-  type SourceConnConfiguration ('Postgres pgKind) = Postgres.PostgresConnConfiguration
   type TableName ('Postgres pgKind) = Postgres.QualifiedTable
   type FunctionName ('Postgres pgKind) = Postgres.QualifiedFunction
   type FunctionArgument ('Postgres pgKind) = Postgres.FunctionArg
@@ -118,8 +115,6 @@ instance
   type ExtraTableMetadata ('Postgres pgKind) = PgExtraTableMetadata pgKind
   type BackendInsert ('Postgres pgKind) = Postgres.BackendInsert pgKind
 
-  type NativeQuery ('Postgres pgKind) = NativeQueryImpl ('Postgres pgKind)
-
   type XComputedField ('Postgres pgKind) = XEnable
   type XRelay ('Postgres pgKind) = XEnable
   type XNodesAgg ('Postgres pgKind) = XEnable
@@ -132,12 +127,13 @@ instance
 
   type HealthCheckTest ('Postgres pgKind) = HealthCheckTestSql
   healthCheckImplementation =
-    Just $
-      HealthCheckImplementation
+    Just
+      $ HealthCheckImplementation
         { _hciDefaultTest = defaultHealthCheckTestSql,
           _hciTestCodec = codec
         }
 
+  supportsAggregateComputedFields = True
   versionCheckImplementation = versionCheckImpl @pgKind
   runPingSource = runPingSourceImpl @pgKind
   isComparableType = Postgres.isComparableType
@@ -160,24 +156,23 @@ instance
   getTableIdentifier = Postgres.getIdentifierQualifiedObject
   namingConventionSupport = Postgres.namingConventionSupport
 
-  resizeSourcePools sourceConfig serverReplicas = (Postgres._pecRunAction (Postgres._pscExecCtx sourceConfig)) (Postgres.ResizePoolMode serverReplicas)
+  resizeSourcePools sourceConfig serverReplicas = (Postgres._pecResizePools (Postgres._pscExecCtx sourceConfig)) serverReplicas
 
   defaultTriggerOnReplication = Just ((), TORDisableTrigger)
 
   resolveConnectionTemplate = Postgres.pgResolveConnectionTemplate
 
 instance
-  ( HasTag ('Postgres pgKind),
-    Typeable ('Postgres pgKind),
-    PostgresBackend pgKind,
-    FromJSON (BackendSourceKind ('Postgres pgKind)),
-    HasCodec (BackendSourceKind ('Postgres pgKind))
+  ( HasTag ('Postgres pgKind)
   ) =>
-  NativeQueryMetadata ('Postgres pgKind)
+  HasSourceConfiguration ('Postgres pgKind)
   where
-  type NativeQueryInfo ('Postgres pgKind) = NativeQueryInfoImpl ('Postgres pgKind)
-  type NativeQueryName ('Postgres pgKind) = NativeQueryNameImpl
-  type TrackNativeQuery ('Postgres pgKind) = TrackNativeQueryImpl ('Postgres pgKind)
-  trackNativeQuerySource = tnqSource
-  nativeQueryInfoName = nqiiRootFieldName
-  nativeQueryTrackToInfo = defaultNativeQueryTrackToInfo
+  type SourceConfig ('Postgres pgKind) = Postgres.PGSourceConfig
+  type SourceConnConfiguration ('Postgres pgKind) = Postgres.PostgresConnConfiguration
+  sourceConfigNumReadReplicas = Postgres.sourceConfigNumReadReplicas
+  sourceConfigConnectonTemplateEnabled = Postgres.sourceConfigConnectonTemplateEnabled
+  sourceConfigBackendSourceKind _sourceConfig =
+    case backendTag @('Postgres pgKind) of
+      PostgresVanillaTag -> PostgresVanillaKind
+      PostgresCitusTag -> PostgresCitusKind
+      PostgresCockroachTag -> PostgresCockroachKind

@@ -1,12 +1,13 @@
 import { useCallback } from 'react';
-import { getRunSqlQuery } from '@/components/Common/utils/v1QueryUtils';
-import Endpoints from '@/Endpoints';
-import { RunSQLResponse } from '@/features/DataSource';
-import { Api } from '@/hooks/apiUtils';
-import { useAppSelector } from '@/store';
+import { getRunSqlQuery } from '../../../../components/Common/utils/v1QueryUtils';
+import Endpoints from '../../../../Endpoints';
+import { RunSQLResponse } from '../../../DataSource';
+import { Api } from '../../../../hooks/apiUtils';
+import { useAppSelector } from '../../../../storeHooks';
 import { useMutation, useQuery } from 'react-query';
 import { fetchTemplateDataQueryFn } from '../utils';
 import { staleTime } from '../constants';
+import 'whatwg-fetch';
 
 type MutationFnArgs = {
   sql: string;

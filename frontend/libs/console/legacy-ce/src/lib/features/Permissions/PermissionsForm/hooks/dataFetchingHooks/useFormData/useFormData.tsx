@@ -1,26 +1,29 @@
 import { useQuery } from 'react-query';
-import { buildClientSchema } from 'graphql';
 
 import {
   DataSource,
   exportMetadata,
-  runIntrospectionQuery,
-} from '@/features/DataSource';
-import { useHttpClient } from '@/features/Network';
+  Operator,
+  TableColumn,
+} from '../../../../../DataSource';
+import { useHttpClient } from '../../../../../Network';
 
 import { createDefaultValues } from './createDefaultValues';
 import { createFormData } from './createFormData';
+import { MetadataDataSource } from '../../../../../../metadata/types';
 
 export type Args = {
   dataSourceName: string;
   table: unknown;
   roleName: string;
   queryType: 'select' | 'insert' | 'update' | 'delete';
+  tableColumns: TableColumn[];
+  metadataSource: MetadataDataSource | undefined;
 };
 
-type ReturnValue = {
-  formData: ReturnType<typeof createFormData>;
-  defaultValues: ReturnType<typeof createDefaultValues>;
+export type ReturnValue = {
+  formData: ReturnType<typeof createFormData> | undefined;
+  defaultValues: ReturnType<typeof createDefaultValues> | undefined;
 };
 
 /**
@@ -33,6 +36,8 @@ export const useFormData = ({
   table,
   roleName,
   queryType,
+  tableColumns = [],
+  metadataSource,
 }: Args) => {
   const httpClient = useHttpClient();
   return useQuery<ReturnValue, Error>({
@@ -41,17 +46,13 @@ export const useFormData = ({
       'permissionFormData',
       JSON.stringify(table),
       roleName,
+      tableColumns,
+      queryType,
     ],
     queryFn: async () => {
-      const introspectionResult = await runIntrospectionQuery({ httpClient });
-      const schema = buildClientSchema(introspectionResult.data);
+      if (tableColumns.length === 0)
+        return { formData: undefined, defaultValues: undefined };
       const metadata = await exportMetadata({ httpClient });
-
-      // get table columns for metadata table from db introspection
-      const tableColumns = await DataSource(httpClient).getTableColumns({
-        dataSourceName,
-        table,
-      });
 
       const defaultQueryRoot = await DataSource(httpClient).getDefaultQueryRoot(
         {
@@ -60,6 +61,12 @@ export const useFormData = ({
         }
       );
 
+      const supportedOperators = (await DataSource(
+        httpClient
+      ).getSupportedOperators({
+        dataSourceName,
+      })) as Operator[];
+
       const defaultValues = createDefaultValues({
         queryType,
         roleName,
@@ -67,8 +74,9 @@ export const useFormData = ({
         metadata,
         table,
         tableColumns,
-        schema,
         defaultQueryRoot,
+        metadataSource,
+        supportedOperators: supportedOperators ?? [],
       });
 
       const formData = createFormData({
@@ -76,6 +84,8 @@ export const useFormData = ({
         table,
         metadata,
         tableColumns,
+        trackedTables: metadataSource?.tables,
+        metadataSource,
       });
 
       return { formData, defaultValues };

@@ -1,4 +1,4 @@
-import { RequestTransform } from '@/metadata/types';
+import { RequestTransform } from '../../../../../metadata/types';
 import { Schema } from '../schema';
 import {
   emptyDefaultValues,
@@ -51,6 +51,10 @@ export const useDefaultValues = (props: Props) => {
       timeout_seconds: stringifyNumberValue(
         currentTrigger.retry_conf?.timeout_seconds,
         '60'
+      ),
+      tolerance_seconds: stringifyNumberValue(
+        currentTrigger.retry_conf?.tolerance_seconds,
+        '21600'
       ),
       include_in_metadata: currentTrigger.include_in_metadata,
       comment: currentTrigger.comment ?? '',

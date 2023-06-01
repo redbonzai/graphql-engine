@@ -1,5 +1,5 @@
-import { TableRow } from '@/features/DataSource';
-import { CardedTable } from '@/new-components/CardedTable';
+import { TableColumn, TableRow } from '../../../../DataSource';
+import { CardedTable } from '../../../../../new-components/CardedTable';
 import {
   FaCaretDown,
   FaCaretUp,
@@ -16,7 +16,7 @@ import {
 } from '@tanstack/react-table';
 import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Relationship } from '@/features/DatabaseRelationships';
+import { Relationship } from '../../../../DatabaseRelationships';
 import { CheckboxItem } from './CheckboxItem';
 import { RowOptionsButton } from './RowOptionsButton';
 import { RowDialog } from './RowDialog';
@@ -24,6 +24,7 @@ import { RowDialog } from './RowDialog';
 interface ReactTableWrapperProps {
   isRowsSelectionEnabled: boolean;
   onRowsSelect: (rows: Record<number, boolean>) => void;
+  onRowDelete: (row: Record<string, any>) => void;
   relationships?: {
     allRelationships: Relationship[];
     onClick: (props: { relationship: Relationship; rowData: TableRow }) => void;
@@ -35,14 +36,23 @@ interface ReactTableWrapperProps {
     sorting: ColumnSort[];
     setSorting: React.Dispatch<React.SetStateAction<ColumnSort[]>>;
   };
+  tableColumns: TableColumn[];
 }
+
+const renderColumnData = (data: any) => {
+  if (['bigint', 'string', 'number'].includes(typeof data)) return data;
+
+  return JSON.stringify(data);
+};
 
 export const ReactTableWrapper: React.VFC<ReactTableWrapperProps> = ({
   isRowsSelectionEnabled,
   onRowsSelect,
+  onRowDelete,
   relationships,
   rows,
   sort,
+  tableColumns: _tableColumns,
 }) => {
   const [currentActiveRow, setCurrentActiveRow] = useState<Record<
     string,
@@ -59,7 +69,7 @@ export const ReactTableWrapper: React.VFC<ReactTableWrapperProps> = ({
       header: () => <span key={column}>{column}</span>,
       enableSorting: true,
       enableMultiSort: true,
-      cell: (info: any) => info.getValue() ?? '',
+      cell: (info: any) => <>{renderColumnData(info.getValue())}</> ?? '',
     })
   );
 
@@ -149,6 +159,7 @@ export const ReactTableWrapper: React.VFC<ReactTableWrapperProps> = ({
             <RowOptionsButton
               row={row.original}
               onOpen={(r: any) => setCurrentActiveRow(r)}
+              onDelete={onRowDelete}
             />
             <CheckboxItem
               {...{
@@ -266,6 +277,7 @@ export const ReactTableWrapper: React.VFC<ReactTableWrapperProps> = ({
         <RowDialog
           row={currentActiveRow}
           onClose={() => setCurrentActiveRow(null)}
+          columns={_tableColumns}
         />
       )}
     </>

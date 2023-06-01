@@ -1,14 +1,14 @@
 import {
   trackCustomEvent,
   programmaticallyTraceError,
-} from '@/features/Analytics';
+} from '../../../Analytics';
 
 import {
   parseUnexistingEnvVarSchemaError,
   parseHasuraEnvVarsNotAllowedError,
-} from '@/features/hasura-metadata-types';
+} from '../../../hasura-metadata-types';
 
-import { useFireNotification } from '@/new-components/Notifications';
+import { useFireNotification } from '../../../../new-components/Notifications';
 
 export function useOnSetOpenTelemetryError(
   fireNotification: ReturnType<typeof useFireNotification>['fireNotification']
@@ -80,12 +80,9 @@ export function useOnSetOpenTelemetryError(
       }
     );
 
-    programmaticallyTraceError(
-      new Error(
-        'OpenTelemetry set_opentelemetry_config error not parsed',
-        // @ts-expect-error This error will automatically disappear with Nx that targets new browsers by default
-        { cause: err }
-      )
-    );
+    programmaticallyTraceError({
+      error: 'OpenTelemetry set_opentelemetry_config error not parsed',
+      cause: err instanceof Error ? err : undefined,
+    });
   };
 }

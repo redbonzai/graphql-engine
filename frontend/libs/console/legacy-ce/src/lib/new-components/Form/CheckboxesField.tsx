@@ -1,6 +1,6 @@
 import React, { ReactText } from 'react';
 import clsx from 'clsx';
-import get from 'lodash.get';
+import get from 'lodash/get';
 import { FieldError, useFormContext, Controller } from 'react-hook-form';
 import { FieldWrapper, FieldWrapperPassThroughProps } from './FieldWrapper';
 import { Checkbox } from './Checkbox';
@@ -70,7 +70,7 @@ export const CheckboxesField: React.FC<CheckboxProps> = ({
               {options.map(
                 ({ label, value, disabled: optionDisabled = false }) => {
                   return (
-                    <div className="flex items-center">
+                    <div key={value} className="flex items-center">
                       <Checkbox
                         {...field}
                         name={name}

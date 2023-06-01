@@ -1,10 +1,14 @@
 import React, { ReactNode, ReactText } from 'react';
 import AceEditor from 'react-ace';
 import { toast } from 'react-hot-toast/headless';
-import { hasuraToast, ToastProps, ToastType } from '@/new-components/Toasts';
-import { showModal } from '@/store/modal/modal.actions';
-import { TableTrackingCustomizationModalKey } from '@/store/modal/modal.constants';
-import { Button } from '@/new-components/Button';
+import {
+  hasuraToast,
+  ToastProps,
+  ToastType,
+} from '../../../new-components/Toasts';
+import { showModal } from '../../../store/modal/modal.actions';
+import { TableTrackingCustomizationModalKey } from '../../../store/modal/modal.constants';
+import { Button } from '../../../new-components/Button';
 import { Thunk } from '../../../types';
 import { Json } from '../../Common/utils/tsUtils';
 
@@ -12,7 +16,7 @@ import './Notification/NotificationOverrides.css';
 import { isObject, isString } from '../../Common/utils/jsUtils';
 
 import styles from './Notification/Notification.module.scss';
-import { useGetAnalyticsAttributes } from '../../../features/Analytics';
+import { getAnalyticsAttributes } from '../../../features/Analytics';
 
 export interface Notification {
   title?: string | JSX.Element;
@@ -35,6 +39,9 @@ export interface Notification {
   onRemove?: () => void;
 }
 
+/**
+ * @deprecated Please use the new toast API /new-components/Toasts/hasuraToast.tsx
+ */
 export const showNotification = (
   options: Notification,
   level: ToastType,
@@ -57,7 +64,7 @@ export const showNotification = (
         onClick: options.alternateActionButtonProps.onClick,
       };
       if (options.alternateActionButtonProps.trackId) {
-        toastProps.button.dataAttributes = useGetAnalyticsAttributes(
+        toastProps.button.dataAttributes = getAnalyticsAttributes(
           options.alternateActionButtonProps.trackId
         );
       }
@@ -91,7 +98,7 @@ export const getNotificationDetails = (
   detailsJson: Json,
   children: React.ReactNode
 ) => {
-  return (
+  return children || detailsJson ? (
     <div className="notification-details">
       <AceEditor
         readOnly
@@ -108,7 +115,7 @@ export const getNotificationDetails = (
       />
       {children}
     </div>
-  );
+  ) : null;
 };
 
 // NOTE: this type has been created by reverse-engineering the original getErrorMessage function
@@ -233,6 +240,9 @@ export const getErrorMessage = (
   return '';
 };
 
+/**
+ * @deprecated Please use the new toast API /new-components/Toasts/hasuraToast.tsx
+ */
 const showErrorNotification = (
   title: string,
   message?: string | null,
@@ -337,12 +347,16 @@ const showErrorNotification = (
     };
 
     const action = getNotificationAction();
+    const errorDetails = [
+      getNotificationDetails(errorJson as Json, getRefreshBtn()),
+    ];
     dispatch(
       showNotification(
         {
           title,
           message: errorMessage,
           action,
+          children: errorDetails,
         },
         'error'
       )
@@ -350,6 +364,9 @@ const showErrorNotification = (
   };
 };
 
+/**
+ * @deprecated Please use the new toast API /new-components/Toasts/hasuraToast.tsx
+ */
 const showSuccessNotification = (
   title: string,
   message?: string,
@@ -370,6 +387,9 @@ const showSuccessNotification = (
   };
 };
 
+/**
+ * @deprecated Please use the new toast API /new-components/Toasts/hasuraToast.tsx
+ */
 const showInfoNotification = (title: string): Thunk => {
   return dispatch => {
     dispatch(
@@ -384,6 +404,9 @@ const showInfoNotification = (title: string): Thunk => {
   };
 };
 
+/**
+ * @deprecated Please use the new toast API /new-components/Toasts/hasuraToast.tsx
+ */
 const showWarningNotification = (
   title: string,
   message: string,
@@ -392,7 +415,10 @@ const showWarningNotification = (
 ): Thunk => {
   const children: JSX.Element[] = [];
   if (dataObj) {
-    children.push(getNotificationDetails(dataObj, null));
+    const notificationDetails = getNotificationDetails(dataObj, null);
+    if (notificationDetails) {
+      children.push(notificationDetails);
+    }
   }
   if (child) {
     children.push(child);

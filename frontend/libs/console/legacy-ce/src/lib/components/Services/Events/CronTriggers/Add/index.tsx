@@ -1,8 +1,11 @@
 import React from 'react';
 import Helmet from 'react-helmet';
 import { browserHistory } from 'react-router';
-import { Analytics, REDACT_EVERYTHING } from '@/features/Analytics';
-import { CronTriggers } from '@/features/CronTriggers';
+import {
+  Analytics,
+  REDACT_EVERYTHING,
+} from '../../../../../features/Analytics';
+import { CronTriggers } from '../../../../../features/CronTriggers';
 
 import { getReactHelmetTitle } from '../../../../Common/utils/reactUtils';
 import { EVENTS_SERVICE_HEADING, CRON_TRIGGER } from '../../constants';
@@ -10,7 +13,7 @@ import { EVENTS_SERVICE_HEADING, CRON_TRIGGER } from '../../constants';
 export const AddConnector: React.FC = () => {
   return (
     <Analytics name="AddScheduledTrigger" {...REDACT_EVERYTHING}>
-      <div className="md-md">
+      <div className="md-md bootstrap-jail">
         <Helmet
           title={getReactHelmetTitle(
             `Create ${CRON_TRIGGER}`,

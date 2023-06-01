@@ -1,11 +1,16 @@
 # ghcid gets its own cache
 GRAPHQL_ENGINE_PATH=$(shell cabal list-bin exe:graphql-engine)
-GHCID_FLAGS = --builddir ./dist-newstyle/repl --repl-option -O0 --repl-option -fobject-code
-GHCID_TESTS_FLAGS = --builddir ./dist-newstyle/repl-tests --repl-option -O0
+
+# `ghcid` breaks if this flag is on because it does it's qualified imports the
+# Traditional way
+GHC_OPTIONS=-Wno-prepositive-qualified-module
+
+GHCID_FLAGS = --builddir ./dist-newstyle/repl --repl-option -O0 --repl-option -frefinement-level-hole-fits=0 -fobject-code --ghc-options=$(GHC_OPTIONS)
+GHCID_TESTS_FLAGS = --builddir ./dist-newstyle/repl-tests --repl-option -O0 --ghc-options=$(GHC_OPTIONS)
 
 define run_ghcid_api_tests
 	@if [[ $$(uname -p) == 'arm' ]]; then \
-		HASURA_TEST_BACKEND_TYPE="$(2)" GRAPHQL_ENGINE=$(GRAPHQL_ENGINE_PATH) ghcid -c "DYLD_LIBRARY_PATH=$$DYLD_LIBRARY_PATH cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
+		HASURA_TEST_BACKEND_TYPE="$(2)" GRAPHQL_ENGINE=$(GRAPHQL_ENGINE_PATH) ghcid -c "DYLD_LIBRARY_PATH=$${DYLD_LIBRARY_PATH:-} cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
 			--test "main"; \
 	else \
   	HASURA_TEST_BACKEND_TYPE="$(2)" GRAPHQL_ENGINE=$(GRAPHQL_ENGINE_PATH) ghcid -c "cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
@@ -15,13 +20,11 @@ endef
 
 define run_ghcid_main_tests
 	@if [[ $$(uname -p) == 'arm' ]]; then \
-		HASURA_TEST_BACKEND_TYPE="$(3)" ghcid -c "DYLD_LIBRARY_PATH=$$DYLD_LIBRARY_PATH cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
-			--test "main" \
-			--setup ":set args $(2)"; \
+		ghcid -c "DYLD_LIBRARY_PATH=$${DYLD_LIBRARY_PATH:-} cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
+			--test "main"; \
 	else \
-  	HASURA_TEST_BACKEND_TYPE="$(3)" ghcid -c "cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
-  		--test "main" \
-			--setup ":set args $(2)"; \
+		ghcid -c "cabal repl $(1) $(GHCID_TESTS_FLAGS)" \
+			--test "main"; \
 	fi
 endef
 
@@ -57,7 +60,7 @@ ghcid-api-tests-pro:
 
 .PHONY: ghcid-test-backends
 ## ghcid-test-backends: run all api tests in ghcid
-ghcid-test-backends: start-backends remove-tix-file
+ghcid-test-backends: start-api-tests-backends remove-tix-file
 	$(call run_ghcid_api_tests,api-tests:exe:api-tests)
 
 .PHONY: ghcid-test-postgres
@@ -106,4 +109,4 @@ ghcid-library-pro:
 .PHONY: ghcid-test-unit
 ## ghcid-test-unit: build and run unit tests in ghcid
 ghcid-test-unit: remove-tix-file
-	$(call run_ghcid_main_tests,graphql-engine:graphql-engine-tests,unit)
+	$(call run_ghcid_main_tests,graphql-engine:graphql-engine-tests)

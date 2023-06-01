@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router';
 import { FaExternalLinkAlt, FaDatabase } from 'react-icons/fa';
-import { Button } from '@/new-components/Button';
-import { isCloudConsole } from '@/utils/cloudConsole';
+import { Button } from '../../../new-components/Button';
+import { isCloudConsole } from '../../../utils/cloudConsole';
 
 import YouTube from 'react-youtube';
 
@@ -36,16 +36,11 @@ const PopupLink = ({
   if (videoId) {
     return (
       <li className={`${styles.popup_item} ${styles.video}`}>
-        <>
-          <div className={styles.link_container}>
-            <span className={styles.link_num}>{index}</span>
-            {title}
-          </div>
-          <YouTube
-            videoId={videoId}
-            opts={{ width: '100%', height: '240px' }}
-          />
-        </>
+        <div className={styles.link_container}>
+          <span className={styles.link_num}>{index}</span>
+          {title}
+        </div>
+        <YouTube videoId={videoId} opts={{ width: '100%', height: '240px' }} />
       </li>
     );
   }

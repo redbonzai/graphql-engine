@@ -1,5 +1,5 @@
 import { push, replace } from 'react-router-redux';
-import { getDataSources } from '@/metadata/selector';
+import { getDataSources } from '../../../metadata/selector';
 import { Thunk } from '../../../types';
 import { makeMigrationCall } from '../Data/DataActions';
 import requestAction from '../../../utils/requestAction';
@@ -651,7 +651,7 @@ export const getEventLogs =
         const invocationsKeys = [
           'id',
           'event_id',
-          'status',
+          'http_status',
           'created_at',
           'request',
           'response',

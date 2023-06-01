@@ -1,6 +1,6 @@
 import React from 'react';
-import { InputField } from '@/new-components/Form';
-import { Collapsible } from '@/new-components/Collapsible';
+import { InputField } from '../../../../../../new-components/Form';
+import { Collapsible } from '../../../../../../new-components/Collapsible';
 import { RequiredEnvVar } from '../../../types';
 import { NeonIcon } from './PgDatabaseField';
 import { getEnvVarFormSegments } from '../utils';
@@ -33,12 +33,21 @@ export function EnvVarsFormFields(props: EnvVarsFormFieldsProps) {
               {isPGDatabaseEnvVarPresent && (
                 <>
                   <div className="flex w-[325px]" />
-                  <div className="flex text-gray-600">
-                    Database creation powered by{' '}
-                    <div className="ml-2">
-                      <NeonIcon />
+                  <a
+                    href="https://neon.tech/"
+                    onClick={e => {
+                      e.stopPropagation();
+                    }}
+                    rel="noreferrer noopener"
+                    target="_blank"
+                  >
+                    <div className="flex text-gray-600">
+                      Database creation powered by{' '}
+                      <div className="ml-2">
+                        <NeonIcon />
+                      </div>
                     </div>
-                  </div>
+                  </a>
                 </>
               )}
             </div>

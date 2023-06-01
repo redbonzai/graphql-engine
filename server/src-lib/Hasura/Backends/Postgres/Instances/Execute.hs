@@ -10,14 +10,14 @@
 -- This module includes the Postgres implementation of queries, mutations, and more.
 module Hasura.Backends.Postgres.Instances.Execute
   ( PreparedSql (..),
+    pgDBQueryPlanSimple,
   )
 where
 
 import Control.Monad.Trans.Control qualified as MT
 import Data.Aeson qualified as J
-import Data.Environment qualified as Env
-import Data.HashMap.Strict qualified as Map
-import Data.HashMap.Strict.InsOrd qualified as OMap
+import Data.HashMap.Strict qualified as HashMap
+import Data.HashMap.Strict.InsOrd qualified as InsOrdHashMap
 import Data.IntMap qualified as IntMap
 import Data.Sequence qualified as Seq
 import Database.PG.Query qualified as PG
@@ -44,11 +44,14 @@ import Hasura.Backends.Postgres.Types.Function qualified as Postgres
 import Hasura.Backends.Postgres.Types.Update qualified as Postgres
 import Hasura.Base.Error (QErr)
 import Hasura.EncJSON (EncJSON, encJFromJValue)
+import Hasura.Function.Cache
 import Hasura.GraphQL.Execute.Backend
   ( BackendExecute (..),
     DBStepInfo (..),
     ExplainPlan (..),
+    OnBaseMonad (..),
     convertRemoteSourceRelationship,
+    withNoStatistics,
   )
 import Hasura.GraphQL.Execute.Subscription.Plan
   ( CohortId,
@@ -64,7 +67,6 @@ import Hasura.GraphQL.Namespace
     RootFieldMap,
   )
 import Hasura.GraphQL.Namespace qualified as G
-import Hasura.GraphQL.Schema.Options qualified as Options
 import Hasura.Prelude
 import Hasura.QueryTags
   ( QueryTagsComment (..),
@@ -77,6 +79,7 @@ import Hasura.RQL.IR.Returning qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.IR.Update qualified as IR
 import Hasura.RQL.Types.Backend
+import Hasura.RQL.Types.BackendType
 import Hasura.RQL.Types.Column
   ( ColumnType (..),
     ColumnValue (..),
@@ -87,9 +90,8 @@ import Hasura.RQL.Types.Common
     JsonAggSelect (..),
     SourceName,
   )
-import Hasura.RQL.Types.Function
+import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.SQL.AnyBackend qualified as AB
-import Hasura.SQL.Backend
 import Hasura.Session (UserInfo (..))
 import Hasura.Tracing qualified as Tracing
 import Language.GraphQL.Draft.Syntax qualified as G
@@ -109,7 +111,7 @@ instance
   where
   type PreparedQuery ('Postgres pgKind) = PreparedSql
   type MultiplexedQuery ('Postgres pgKind) = PGL.MultiplexedQuery
-  type ExecutionMonad ('Postgres pgKind) = Tracing.TraceT (PG.TxET QErr IO)
+  type ExecutionMonad ('Postgres pgKind) = PG.TxET QErr
 
   mkDBQueryPlan = pgDBQueryPlan
   mkDBMutationPlan = pgDBMutationPlan
@@ -129,25 +131,44 @@ pgDBQueryPlan ::
     MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
-  Env.Environment ->
   SourceName ->
   SourceConfig ('Postgres pgKind) ->
   QueryDB ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   [HTTP.Header] ->
   Maybe G.Name ->
   m (DBStepInfo ('Postgres pgKind))
-pgDBQueryPlan userInfo _env sourceName sourceConfig qrf reqHeaders operationName = do
-  (preparedQuery, PlanningSt _ _ planVals) <-
+pgDBQueryPlan userInfo sourceName sourceConfig qrf reqHeaders operationName = do
+  (preparedQuery, PlanningSt {_psPrepped = planVals}) <-
     flip runStateT initPlanningSt $ traverse (prepareWithPlan userInfo) qrf
+
   queryTagsComment <- ask
   resolvedConnectionTemplate <-
-    applyConnectionTemplateResolverNonAdmin (_pscConnectionTemplateResolver sourceConfig) userInfo reqHeaders $
-      Just $
-        QueryContext operationName $
-          QueryOperationType G.OperationTypeQuery
+    let connectionTemplateResolver =
+          connectionTemplateConfigResolver (_pscConnectionTemplateConfig sourceConfig)
+        queryContext =
+          Just
+            $ QueryContext operationName
+            $ QueryOperationType G.OperationTypeQuery
+     in applyConnectionTemplateResolverNonAdmin connectionTemplateResolver userInfo reqHeaders queryContext
   let preparedSQLWithQueryTags = appendPreparedSQLWithQueryTags (irToRootFieldPlan planVals preparedQuery) queryTagsComment
   let (action, preparedSQL) = mkCurPlanTx userInfo preparedSQLWithQueryTags
-  pure $ DBStepInfo @('Postgres pgKind) sourceName sourceConfig preparedSQL action resolvedConnectionTemplate
+
+  pure $ DBStepInfo @('Postgres pgKind) sourceName sourceConfig preparedSQL (fmap withNoStatistics action) resolvedConnectionTemplate
+
+-- | Used by the @dc-postgres-agent to compile a query.
+pgDBQueryPlanSimple ::
+  (MonadError QErr m) =>
+  UserInfo ->
+  QueryTagsComment ->
+  QueryDB ('Postgres 'Vanilla) Void (UnpreparedValue ('Postgres 'Vanilla)) ->
+  m (OnBaseMonad (PG.TxET QErr) EncJSON, Maybe PreparedSql)
+pgDBQueryPlanSimple userInfo queryTagsComment query = do
+  (preparedQuery, PlanningSt {_psPrepped = planVals}) <-
+    flip runStateT initPlanningSt $ traverse (prepareWithPlan userInfo) query
+  let preparedSQLWithQueryTags =
+        appendPreparedSQLWithQueryTags (irToRootFieldPlan planVals preparedQuery) queryTagsComment
+  let (action, preparedSQL) = mkCurPlanTx userInfo preparedSQLWithQueryTags
+  pure (action, preparedSQL)
 
 pgDBQueryExplain ::
   forall pgKind m.
@@ -170,18 +191,20 @@ pgDBQueryExplain fieldName userInfo sourceName sourceConfig rootSelection reqHea
       -- CAREFUL!: an `EXPLAIN ANALYZE` here would actually *execute* this
       -- query, maybe resulting in privilege escalation:
       withExplain = "EXPLAIN " <> textSQL
-  let action =
-        liftTx $
-          PG.withQE dmlTxErrorHandler (PG.fromText withExplain) () True <&> \planList ->
-            encJFromJValue $ ExplainPlan fieldName (Just textSQL) (Just $ map runIdentity planList)
+  let action = OnBaseMonad do
+        PG.withQE dmlTxErrorHandler (PG.fromText withExplain) () True <&> \planList ->
+          withNoStatistics $ encJFromJValue $ ExplainPlan fieldName (Just textSQL) (Just $ map runIdentity planList)
   resolvedConnectionTemplate <-
-    applyConnectionTemplateResolverNonAdmin (_pscConnectionTemplateResolver sourceConfig) userInfo reqHeaders $
-      Just $
-        QueryContext operationName $
-          QueryOperationType G.OperationTypeQuery
-  pure $
-    AB.mkAnyBackend $
-      DBStepInfo @('Postgres pgKind) sourceName sourceConfig Nothing action resolvedConnectionTemplate
+    let connectionTemplateResolver =
+          connectionTemplateConfigResolver (_pscConnectionTemplateConfig sourceConfig)
+        queryContext =
+          Just
+            $ QueryContext operationName
+            $ QueryOperationType G.OperationTypeQuery
+     in applyConnectionTemplateResolverNonAdmin connectionTemplateResolver userInfo reqHeaders queryContext
+  pure
+    $ AB.mkAnyBackend
+    $ DBStepInfo @('Postgres pgKind) sourceName sourceConfig Nothing action resolvedConnectionTemplate
 
 pgDBSubscriptionExplain ::
   ( MonadError QErr m,
@@ -200,10 +223,11 @@ pgDBSubscriptionExplain plan = do
       resolvedConnectionTemplate = _sqpResolvedConnectionTemplate plan
   cohortId <- newCohortId
   explanationLines <-
-    liftEitherM $
-      runExceptT $
-        _pecRunTx pgExecCtx (PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate)) $
-          map runIdentity <$> PGL.executeQuery explainQuery [(cohortId, _sqpVariables plan)]
+    liftEitherM
+      $ runExceptT
+      $ _pecRunTx pgExecCtx (PGExecCtxInfo (Tx PG.ReadOnly Nothing) (GraphQLQuery resolvedConnectionTemplate))
+      $ map runIdentity
+      <$> PGL.executeQuery explainQuery [(cohortId, _sqpVariables plan)]
   pure $ SubscriptionQueryPlanExplanation queryText explanationLines $ _sqpVariables plan
 
 -- mutation
@@ -218,11 +242,14 @@ convertDelete ::
   UserInfo ->
   IR.AnnDelG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   Options.StringifyNumbers ->
-  m (Tracing.TraceT (PG.TxET QErr IO) EncJSON)
+  m (OnBaseMonad (PG.TxET QErr) EncJSON)
 convertDelete userInfo deleteOperation stringifyNum = do
   queryTags <- ask
   preparedDelete <- traverse (prepareWithoutPlan userInfo) deleteOperation
-  pure $ flip runReaderT queryTags $ PGE.execDeleteQuery stringifyNum (_adNamingConvention deleteOperation) userInfo (preparedDelete, Seq.empty)
+  pure
+    $ OnBaseMonad
+    $ flip runReaderT queryTags
+    $ PGE.execDeleteQuery stringifyNum (_adNamingConvention deleteOperation) userInfo (preparedDelete, Seq.empty)
 
 convertUpdate ::
   forall pgKind m.
@@ -234,16 +261,17 @@ convertUpdate ::
   UserInfo ->
   IR.AnnotatedUpdateG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   Options.StringifyNumbers ->
-  m (Tracing.TraceT (PG.TxET QErr IO) EncJSON)
+  m (OnBaseMonad (PG.TxET QErr) EncJSON)
 convertUpdate userInfo updateOperation stringifyNum = do
   queryTags <- ask
   preparedUpdate <- traverse (prepareWithoutPlan userInfo) updateOperation
   if Postgres.updateVariantIsEmpty $ IR._auUpdateVariant updateOperation
-    then pure $ pure $ IR.buildEmptyMutResp $ IR._auOutput preparedUpdate
+    then pure $ OnBaseMonad $ pure $ IR.buildEmptyMutResp $ IR._auOutput preparedUpdate
     else
-      pure $
-        flip runReaderT queryTags $
-          PGE.execUpdateQuery stringifyNum (_auNamingConvention updateOperation) userInfo (preparedUpdate, Seq.empty)
+      pure
+        $ OnBaseMonad
+        $ flip runReaderT queryTags
+        $ PGE.execUpdateQuery stringifyNum (_auNamingConvention updateOperation) userInfo (preparedUpdate, Seq.empty)
 
 convertInsert ::
   forall pgKind m.
@@ -255,11 +283,14 @@ convertInsert ::
   UserInfo ->
   IR.AnnotatedInsert ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
   Options.StringifyNumbers ->
-  m (Tracing.TraceT (PG.TxET QErr IO) EncJSON)
+  m (OnBaseMonad (PG.TxET QErr) EncJSON)
 convertInsert userInfo insertOperation stringifyNum = do
   queryTags <- ask
   preparedInsert <- traverse (prepareWithoutPlan userInfo) insertOperation
-  pure $ flip runReaderT queryTags $ convertToSQLTransaction preparedInsert userInfo Seq.empty stringifyNum (_aiNamingConvention insertOperation)
+  pure
+    $ OnBaseMonad
+    $ flip runReaderT queryTags
+    $ convertToSQLTransaction preparedInsert userInfo Seq.empty stringifyNum (_aiNamingConvention insertOperation)
 
 -- | A pared-down version of 'Query.convertQuerySelSet', for use in execution of
 -- special case of SQL function mutations (see 'MDBFunction').
@@ -274,21 +305,21 @@ convertFunction ::
   JsonAggSelect ->
   -- | VOLATILE function as 'SelectExp'
   IR.AnnSimpleSelectG ('Postgres pgKind) Void (UnpreparedValue ('Postgres pgKind)) ->
-  m (Tracing.TraceT (PG.TxET QErr IO) EncJSON)
+  m (OnBaseMonad (PG.TxET QErr) EncJSON)
 convertFunction userInfo jsonAggSelect unpreparedQuery = do
   queryTags <- ask
   -- Transform the RQL AST into a prepared SQL query
-  (preparedQuery, PlanningSt _ _ planVals) <-
-    flip runStateT initPlanningSt $
-      traverse (prepareWithPlan userInfo) unpreparedQuery
+  (preparedQuery, PlanningSt {_psPrepped = planVals}) <-
+    flip runStateT initPlanningSt
+      $ traverse (prepareWithPlan userInfo) unpreparedQuery
   let queryResultFn =
         case jsonAggSelect of
           JASMultipleRows -> QDBMultipleRows
           JASSingleObject -> QDBSingleRow
   let preparedSQLWithQueryTags = appendPreparedSQLWithQueryTags (irToRootFieldPlan planVals $ queryResultFn preparedQuery) queryTags
-  pure $!
-    fst $
-      mkCurPlanTx userInfo preparedSQLWithQueryTags -- forget (Maybe PreparedSql)
+  pure
+    $! fst
+    $ mkCurPlanTx userInfo preparedSQLWithQueryTags -- forget (Maybe PreparedSql)
 
 pgDBMutationPlan ::
   forall pgKind m.
@@ -298,7 +329,6 @@ pgDBMutationPlan ::
     MonadReader QueryTagsComment m
   ) =>
   UserInfo ->
-  Env.Environment ->
   Options.StringifyNumbers ->
   SourceName ->
   SourceConfig ('Postgres pgKind) ->
@@ -306,19 +336,29 @@ pgDBMutationPlan ::
   [HTTP.Header] ->
   Maybe G.Name ->
   m (DBStepInfo ('Postgres pgKind))
-pgDBMutationPlan userInfo _environment stringifyNum sourceName sourceConfig mrf reqHeaders operationName = do
+pgDBMutationPlan userInfo stringifyNum sourceName sourceConfig mrf reqHeaders operationName = do
   resolvedConnectionTemplate <-
-    applyConnectionTemplateResolverNonAdmin (_pscConnectionTemplateResolver sourceConfig) userInfo reqHeaders $
-      Just $
-        QueryContext operationName $
-          QueryOperationType G.OperationTypeMutation
+    let connectionTemplateResolver =
+          connectionTemplateConfigResolver (_pscConnectionTemplateConfig sourceConfig)
+        queryContext =
+          Just
+            $ QueryContext operationName
+            $ QueryOperationType G.OperationTypeMutation
+     in applyConnectionTemplateResolverNonAdmin connectionTemplateResolver userInfo reqHeaders queryContext
   go resolvedConnectionTemplate <$> case mrf of
     MDBInsert s -> convertInsert userInfo s stringifyNum
     MDBUpdate s -> convertUpdate userInfo s stringifyNum
     MDBDelete s -> convertDelete userInfo s stringifyNum
     MDBFunction returnsSet s -> convertFunction userInfo returnsSet s
   where
-    go resolvedConnectionTemplate v = DBStepInfo @('Postgres pgKind) sourceName sourceConfig Nothing v resolvedConnectionTemplate
+    go resolvedConnectionTemplate v =
+      DBStepInfo
+        { dbsiSourceName = sourceName,
+          dbsiSourceConfig = sourceConfig,
+          dbsiPreparedQuery = Nothing,
+          dbsiAction = fmap withNoStatistics v,
+          dbsiResolvedConnectionTemplate = resolvedConnectionTemplate
+        }
 
 -- subscription
 
@@ -340,21 +380,24 @@ pgDBLiveQuerySubscriptionPlan ::
   m (SubscriptionQueryPlan ('Postgres pgKind) (MultiplexedQuery ('Postgres pgKind)))
 pgDBLiveQuerySubscriptionPlan userInfo _sourceName sourceConfig namespace unpreparedAST reqHeaders operationName = do
   (preparedAST, PGL.QueryParametersInfo {..}) <-
-    flip runStateT mempty $
-      for unpreparedAST $
-        traverse (PGL.resolveMultiplexedValue (_uiSession userInfo))
+    flip runStateT mempty
+      $ for unpreparedAST
+      $ traverse (PGL.resolveMultiplexedValue (_uiSession userInfo))
   subscriptionQueryTagsComment <- ask
-  let multiplexedQuery = PGL.mkMultiplexedQuery $ OMap.mapKeys _rfaAlias preparedAST
+  let multiplexedQuery = PGL.mkMultiplexedQuery $ InsOrdHashMap.mapKeys _rfaAlias preparedAST
       multiplexedQueryWithQueryTags =
         multiplexedQuery {PGL.unMultiplexedQuery = appendSQLWithQueryTags (PGL.unMultiplexedQuery multiplexedQuery) subscriptionQueryTagsComment}
       roleName = _uiRole userInfo
       parameterizedPlan = ParameterizedSubscriptionQueryPlan roleName multiplexedQueryWithQueryTags
 
   resolvedConnectionTemplate <-
-    applyConnectionTemplateResolverNonAdmin (_pscConnectionTemplateResolver sourceConfig) userInfo reqHeaders $
-      Just $
-        QueryContext operationName $
-          QueryOperationType G.OperationTypeSubscription
+    let connectionTemplateResolver =
+          connectionTemplateConfigResolver (_pscConnectionTemplateConfig sourceConfig)
+        queryContext =
+          Just
+            $ QueryContext operationName
+            $ QueryOperationType G.OperationTypeSubscription
+     in applyConnectionTemplateResolverNonAdmin connectionTemplateResolver userInfo reqHeaders queryContext
 
   -- Cohort Id: Used for validating the multiplexed query. See @'testMultiplexedQueryTx'.
   -- It is disposed when the subscriber is added to existing cohort.
@@ -399,8 +442,8 @@ pgDBStreamingSubscriptionPlan ::
   m (SubscriptionQueryPlan ('Postgres pgKind) (MultiplexedQuery ('Postgres pgKind)))
 pgDBStreamingSubscriptionPlan userInfo _sourceName sourceConfig (rootFieldAlias, unpreparedAST) reqHeaders operationName = do
   (preparedAST, PGL.QueryParametersInfo {..}) <-
-    flip runStateT mempty $
-      traverse (PGL.resolveMultiplexedValue (_uiSession userInfo)) unpreparedAST
+    flip runStateT mempty
+      $ traverse (PGL.resolveMultiplexedValue (_uiSession userInfo)) unpreparedAST
   subscriptionQueryTagsComment <- ask
   let multiplexedQuery = PGL.mkStreamingMultiplexedQuery (G._rfaAlias rootFieldAlias, preparedAST)
       multiplexedQueryWithQueryTags =
@@ -409,10 +452,13 @@ pgDBStreamingSubscriptionPlan userInfo _sourceName sourceConfig (rootFieldAlias,
       parameterizedPlan = ParameterizedSubscriptionQueryPlan roleName multiplexedQueryWithQueryTags
 
   resolvedConnectionTemplate <-
-    applyConnectionTemplateResolverNonAdmin (_pscConnectionTemplateResolver sourceConfig) userInfo reqHeaders $
-      Just $
-        QueryContext operationName $
-          QueryOperationType G.OperationTypeSubscription
+    let connectionTemplateResolver =
+          connectionTemplateConfigResolver (_pscConnectionTemplateConfig sourceConfig)
+        queryContext =
+          Just
+            $ QueryContext operationName
+            $ QueryOperationType G.OperationTypeSubscription
+     in applyConnectionTemplateResolverNonAdmin connectionTemplateResolver userInfo reqHeaders queryContext
 
   -- Cohort Id: Used for validating the multiplexed query. See @'testMultiplexedQueryTx'.
   -- It is disposed when the subscriber is added to existing cohort.
@@ -446,7 +492,7 @@ pgDBStreamingSubscriptionPlan userInfo _sourceName sourceConfig (rootFieldAlias,
         QDBStreamMultipleRows (IR.AnnSelectStreamG () _ _ _ args _) ->
           let cursorArg = IR._ssaCursorArg args
               colInfo = IR._sciColInfo cursorArg
-           in Map.singleton (ciName colInfo) (IR._sciInitialValue cursorArg)
+           in HashMap.singleton (ciName colInfo) (IR._sciInitialValue cursorArg)
         _ -> mempty
 
 -- | Test a multiplexed query in a transaction.
@@ -476,27 +522,18 @@ testMultiplexedQueryTx (PGL.MultiplexedQuery query) cohortId cohortVariables = d
 mkCurPlanTx ::
   UserInfo ->
   PreparedSql ->
-  (Tracing.TraceT (PG.TxET QErr IO) EncJSON, Maybe PreparedSql)
+  (OnBaseMonad (PG.TxET QErr) EncJSON, Maybe PreparedSql)
 mkCurPlanTx userInfo ps@(PreparedSql q prepMap) =
   -- generate the SQL and prepared vars or the bytestring
   let args = withUserVars (_uiSession userInfo) prepMap
       -- WARNING: this quietly assumes the intmap keys are contiguous
       prepArgs = fst <$> IntMap.elems args
-   in (,Just ps) $
-        Tracing.trace "Postgres" $
-          liftTx $
-            asSingleRowJsonResp q prepArgs
-
--- | This function is generally used on the result of 'selectQuerySQL',
--- 'selectAggregateQuerySQL' or 'connectionSelectSQL' to run said query and get
--- back the resulting JSON.
-asSingleRowJsonResp ::
-  PG.Query ->
-  [PG.PrepArg] ->
-  PG.TxE QErr EncJSON
-asSingleRowJsonResp query args =
-  runIdentity . PG.getRow
-    <$> PG.rawQE dmlTxErrorHandler query args True
+   in (,Just ps) $ OnBaseMonad do
+        -- https://opentelemetry.io/docs/reference/specification/trace/semantic_conventions/database/#connection-level-attributes
+        Tracing.attachMetadata [("db.system", "postgresql")]
+        runIdentity
+          . PG.getRow
+          <$> PG.rawQE dmlTxErrorHandler q prepArgs True
 
 -- convert a query from an intermediate representation to... another
 irToRootFieldPlan ::
@@ -564,22 +601,22 @@ pgDBRemoteRelationshipPlan userInfo sourceName sourceConfig lhs lhsSchema argume
   -- In the future if we want to add support we'll need to add a new type of
   -- metadata (e.g. 'ParameterizedQueryHash' doesn't make sense here) and find
   -- a root field name that makes sense to attach to it.
-  flip runReaderT emptyQueryTagsComment $ pgDBQueryPlan userInfo Env.emptyEnvironment sourceName sourceConfig rootSelection reqHeaders operationName
+  flip runReaderT emptyQueryTagsComment $ pgDBQueryPlan userInfo sourceName sourceConfig rootSelection reqHeaders operationName
   where
     coerceToColumn = Postgres.unsafePGCol . getFieldNameTxt
     joinColumnMapping = mapKeys coerceToColumn lhsSchema
 
     rowsArgument :: UnpreparedValue ('Postgres pgKind)
     rowsArgument =
-      UVParameter Nothing $
-        ColumnValue (ColumnScalar Postgres.PGJSONB) $
-          Postgres.PGValJSONB $
-            PG.JSONB $
-              J.toJSON lhs
+      UVParameter FreshVar
+        $ ColumnValue (ColumnScalar Postgres.PGJSONB)
+        $ Postgres.PGValJSONB
+        $ PG.JSONB
+        $ J.toJSON lhs
     jsonToRecordSet :: IR.SelectFromG ('Postgres pgKind) (UnpreparedValue ('Postgres pgKind))
 
     recordSetDefinitionList =
-      (coerceToColumn argumentId, Postgres.PGBigInt) : Map.toList (fmap snd joinColumnMapping)
+      (coerceToColumn argumentId, Postgres.PGBigInt) : HashMap.toList (fmap snd joinColumnMapping)
     jsonToRecordSet =
       IR.FromFunction
         (Postgres.QualifiedObject "pg_catalog" $ Postgres.FunctionName "jsonb_to_recordset")

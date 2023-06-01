@@ -1,13 +1,13 @@
-import { MetadataResponse } from '@/features/MetadataAPI';
-import { Api } from '@/hooks/apiUtils';
-import { getRunSqlQuery } from '@/components/Common/utils/v1QueryUtils';
-import dataHeaders from '@/components/Services/Data/Common/Headers';
+import { MetadataResponse } from '../features/MetadataAPI';
+import { Api } from '../hooks/apiUtils';
+import { getRunSqlQuery } from '../components/Common/utils/v1QueryUtils';
+import dataHeaders from '../components/Services/Data/Common/Headers';
 import {
   ConnectDBEvent,
   sendTelemetryEvent,
   trackRuntimeError,
-} from '@/telemetry';
-import { RunSQLSelectResponse } from '@/features/DataSource';
+} from '../telemetry';
+import { RunSQLSelectResponse } from '../features/DataSource';
 import requestAction from '../utils/requestAction';
 import Endpoints, { globalCookiePolicy } from '../Endpoints';
 
@@ -75,6 +75,8 @@ import {
 import _push from '../components/Services/Data/push';
 import { dataSourceIsEqual } from '../components/Services/Data/DataSources/utils';
 import { getSourceDriver } from '../components/Services/Data/utils';
+import { hasuraToast } from '../new-components/Toasts';
+import { createTextWithLinks } from './hyperlinkErrorMessageLink';
 
 export interface ExportMetadataSuccess {
   type: 'Metadata/EXPORT_METADATA_SUCCESS';
@@ -650,8 +652,29 @@ export const replaceMetadata =
       const successMsg = 'Metadata imported';
       const errorMsg = 'Failed importing metadata';
 
-      const customOnSuccess = () => {
+      const customOnSuccess = (
+        response: [{ warnings: { code: string; message: string }[] }]
+      ) => {
         if (successCb) successCb();
+        const title = (code: string) => {
+          if (code === 'illegal-event-trigger-name')
+            return 'Rename Event Trigger Suggested';
+          if (code === 'source-cleanup-failed') {
+            return 'Manual Event Trigger Cleanup Needed';
+          } else {
+            return 'Time Limit Exceeded System Limit';
+          }
+        };
+        response?.[0]?.warnings?.forEach(i => {
+          hasuraToast({
+            type: 'warning',
+            title: title(i.code),
+            children: createTextWithLinks(i.message),
+            toastOptions: {
+              duration: Infinity,
+            },
+          });
+        });
 
         const updateCurrentDataSource = (newState: MetadataResponse) => {
           const currentSource = newState.metadata.sources.find(
@@ -733,13 +756,23 @@ export const resetMetadata =
     return dispatch(
       requestAction(Endpoints.metadata, options as RequestInit)
     ).then(
-      () => {
+      (response: { warnings: { code: string; message: string }[] }) => {
         dispatch({ type: UPDATE_CURRENT_DATA_SOURCE, source: '' });
         dispatch(exportMetadata());
-        if (successCb) {
-          successCb();
-        }
-        dispatch(showSuccessNotification('Metadata reset successfully!'));
+        if (successCb) successCb();
+
+        response?.warnings?.forEach(i => {
+          hasuraToast({
+            type: 'warning',
+            title: 'Manual Event Trigger Cleanup Needed',
+            children: createTextWithLinks(i.message),
+            toastOptions: {
+              duration: Infinity,
+            },
+          });
+        });
+
+        hasuraToast({ title: 'Metadata reset successfully!', type: 'success' });
       },
       error => {
         console.error(error);
@@ -1198,6 +1231,7 @@ export const addAllowedQueries = (
 
 export const addInsecureDomain = (
   host: string,
+  port: string,
   callback: any
 ): Thunk<void, MetadataActions> => {
   return (dispatch, getState) => {
@@ -1206,17 +1240,19 @@ export const addInsecureDomain = (
 
       return;
     }
-    const upQuery = addInsecureDomainQuery(host);
+    const upQuery = addInsecureDomainQuery(host, port);
     const migrationName = `add_insecure_tls_domains`;
     const requestMsg = 'Adding domain to insecure TLS allow list...';
     const successMsg = `Domain added to insecure TLS allow list successfully`;
     const errorMsg = 'Adding domain to insecure TLS allow list failed';
 
     const onSuccess = () => {
+      dispatch(exportMetadata());
       callback();
     };
 
     const onError = () => {};
+
     makeMigrationCall(
       dispatch,
       getState,
@@ -1233,16 +1269,19 @@ export const addInsecureDomain = (
 };
 
 export const deleteInsecureDomain = (
-  host: string
+  host: string,
+  port?: string
 ): Thunk<void, MetadataActions> => {
   return (dispatch, getState) => {
-    const upQuery = deleteDomain(host);
+    const upQuery = deleteDomain(host, port);
     const migrationName = `delete_insecure_domain`;
     const requestMsg = 'Deleting Insecure domain...';
     const successMsg = 'Domain deleted!';
     const errorMsg = 'Deleting domain failed!';
 
-    const onSuccess = () => {};
+    const onSuccess = () => {
+      dispatch(exportMetadata());
+    };
 
     const onError = () => {};
 

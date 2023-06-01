@@ -1,10 +1,21 @@
-import { useTableColumns } from '@/features/BrowseRows';
-import { MetadataSelectors, useMetadata } from '@/features/hasura-metadata-api';
+import { useTableColumns } from '../../BrowseRows';
+import { TableColumn } from '../../DataSource';
+import { MetadataSelectors, useMetadata } from '../../hasura-metadata-api';
+import { MetadataTableColumnConfig } from '../../hasura-metadata-types';
+import { UseQueryResult } from 'react-query';
+
+export type ListAllTableColumn = TableColumn & {
+  config: MetadataTableColumnConfig | undefined;
+};
+
+export type ListAllTableColumnsReturn = {
+  columns: ListAllTableColumn[];
+} & Omit<UseQueryResult, 'data'>;
 
 export const useListAllTableColumns = (
   dataSourceName: string,
   table: unknown
-) => {
+): ListAllTableColumnsReturn => {
   const { data: tableColumns } = useTableColumns({
     table,
     dataSourceName,

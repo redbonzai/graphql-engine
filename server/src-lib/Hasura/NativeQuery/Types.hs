@@ -1,89 +1,26 @@
--- | This module houses the types that are necessary to even talk about native
--- queries abstract of a concrete implementation.
---
--- The default implementation is given in modules
--- 'Hasura.NativeQuery.Metadata', and 'Hasura.NativeQuery.API', but backends
--- are free to provide their own as needed.
+-- | A name for a native query as it is recognized by the graphql schema.
 module Hasura.NativeQuery.Types
-  ( NativeQueryMetadata (..),
-    NativeQueryParseError (..),
-    BackendTrackNativeQuery (..),
+  ( NativeQueryName (..),
+    NullableScalarType (..),
   )
 where
 
-import Autodocodec (HasCodec)
-import Data.Aeson
-import Data.Kind
+import Autodocodec (HasCodec (codec), dimapCodec)
+import Data.Aeson (FromJSON, FromJSONKey, ToJSON, ToJSONKey)
 import Data.Text.Extended (ToTxt)
-import Data.Voidable
-import Hasura.Prelude
-import Hasura.RQL.Types.Common
-import Hasura.SQL.Backend
+import Hasura.LogicalModel.NullableScalarType
+import Hasura.Prelude hiding (first)
+import Language.GraphQL.Draft.Syntax qualified as G
+import Language.Haskell.TH.Syntax (Lift)
 
-type Representable a = (Show a, Eq a, Hashable a, NFData a)
+-- The name of a native query. This appears as a root field name in the graphql schema.
+newtype NativeQueryName = NativeQueryName {getNativeQueryName :: G.Name}
+  deriving newtype (Eq, Ord, Show, Hashable, NFData, ToJSON, FromJSON, ToTxt)
+  deriving stock (Data, Generic, Lift)
 
-type APIType a = (ToJSON a, FromJSON a)
+instance HasCodec NativeQueryName where
+  codec = dimapCodec NativeQueryName getNativeQueryName codec
 
--- | This type class models the types and functions necessary to talk about
--- Native Queries.
---
--- Uninstantiable defaults are given for types and methods. In order to work
--- gracefully with this approach, types require instances wrapped in the
--- 'Voidable' newtype, see module 'Data.Voidable' for more on this.
-class
-  ( APIType (Voidable (NativeQueryName b)),
-    APIType (Voidable (TrackNativeQuery b)),
-    FromJSON (Voidable [NativeQueryInfo b]),
-    Ord (NativeQueryName b),
-    Representable (NativeQueryInfo b),
-    Representable (NativeQueryName b),
-    Eq (Voidable [NativeQueryInfo b]),
-    HasCodec (Voidable [NativeQueryInfo b]),
-    ToJSON (Voidable [NativeQueryInfo b]),
-    ToTxt (NativeQueryName b)
-  ) =>
-  NativeQueryMetadata (b :: BackendType)
-  where
-  -- | The type of persisted metadata.
-  type NativeQueryInfo b :: Type
+instance FromJSONKey NativeQueryName
 
-  type NativeQueryInfo b = Void
-
-  -- | The types of names of native queries.
-  type NativeQueryName b :: Type
-
-  type NativeQueryName b = Void
-
-  -- | The API payload of the 'track_native_query' api endpoint.
-  type TrackNativeQuery b :: Type
-
-  type TrackNativeQuery b = Void
-
-  -- | Projection function identifying the name of the source a 'track_native_query' request concerns.
-  trackNativeQuerySource :: TrackNativeQuery b -> SourceName
-  default trackNativeQuerySource :: (TrackNativeQuery b ~ Void) => TrackNativeQuery b -> SourceName
-  trackNativeQuerySource = absurd
-
-  -- | Projection function giving the name of a native query.
-  nativeQueryInfoName :: NativeQueryInfo b -> NativeQueryName b
-  default nativeQueryInfoName :: (NativeQueryInfo b ~ Void) => NativeQueryInfo b -> NativeQueryName b
-  nativeQueryInfoName = absurd
-
-  -- | Projection function, producing a 'NativeQueryInfo b' from a 'TrackNativeQuery b'.
-  nativeQueryTrackToInfo :: TrackNativeQuery b -> NativeQueryInfo b
-  default nativeQueryTrackToInfo :: (TrackNativeQuery b ~ Void) => TrackNativeQuery b -> NativeQueryInfo b
-  nativeQueryTrackToInfo = absurd
-
--- | Our API endpoint solution wraps all request payload types in 'AnyBackend'
--- for its multi-backend support, but type families must be fully applied to
--- all their arguments.
---
--- So in order to be usable as an API request payload data type,
--- 'TrackNativeQuery b' needs to be wrapped in a newtype.
-newtype BackendTrackNativeQuery b = BackendTrackNativeQuery {getBackendTrackNativeQuery :: Voidable (TrackNativeQuery b)}
-
-deriving newtype instance NativeQueryMetadata b => FromJSON (BackendTrackNativeQuery b)
-
--- Things that might go wrong when converting a Native Query metadata request
--- into a valid metadata item (such as failure to interpolate the query)
-newtype NativeQueryParseError = NativeQueryParseError Text
+instance ToJSONKey NativeQueryName

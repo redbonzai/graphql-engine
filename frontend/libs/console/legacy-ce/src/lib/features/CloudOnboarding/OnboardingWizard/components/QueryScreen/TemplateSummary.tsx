@@ -1,19 +1,15 @@
 import * as React from 'react';
 import { useQuery } from 'react-query';
-import { programmaticallyTraceError } from '@/features/Analytics';
-import { Dispatch } from '@/types';
+import { programmaticallyTraceError } from '../../../../Analytics';
+import { Dispatch } from '../../../../../types';
 import {
   staleTime,
   templateSummaryRunQueryClickVariables,
   templateSummaryRunQuerySkipVariables,
 } from '../../constants';
 import { QueryScreen } from './QueryScreen';
-import {
-  fetchTemplateDataQueryFn,
-  runQueryInGraphiQL,
-  fillSampleQueryInGraphiQL,
-  emitOnboardingEvent,
-} from '../../utils';
+import { fetchTemplateDataQueryFn, emitOnboardingEvent } from '../../utils';
+import { runQueryInGraphiQL, fillSampleQueryInGraphiQL } from '../../../utils';
 
 type Props = {
   templateUrl: string;
@@ -62,13 +58,10 @@ export function TemplateSummary(props: Props) {
     staleTime,
     onError: (e: any) => {
       // this is unexpected; so get alerted
-      programmaticallyTraceError(
-        new Error('failed to get a sample query in template summary'),
-        {
-          sourceError: e,
-          errorMessage: e.message ?? '',
-        }
-      );
+      programmaticallyTraceError({
+        error: 'failed to get a sample query in template summary',
+        cause: e,
+      });
     },
   });
 

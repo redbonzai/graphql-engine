@@ -1,5 +1,5 @@
 import React from 'react';
-import { Analytics, REDACT_EVERYTHING } from '@/features/Analytics';
+import { Analytics, REDACT_EVERYTHING } from '../../../features/Analytics';
 
 import { OrderBy } from '../utils/v1QueryUtils';
 import { useFilterQuery, TriggerOperation } from './state';
@@ -57,7 +57,7 @@ const FilterQuery: React.FC<Props> = props => {
 
   return (
     <Analytics name="EventFilterQuery" {...REDACT_EVERYTHING}>
-      <div className={styles.add_mar_top}>
+      <div className={styles.add_mar_top} data-test="event-filter-table">
         {render(rows, state, setState, runQuery)}
       </div>
     </Analytics>

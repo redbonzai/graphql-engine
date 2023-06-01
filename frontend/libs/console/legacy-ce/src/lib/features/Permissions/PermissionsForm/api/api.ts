@@ -1,13 +1,14 @@
-import { allowedMetadataTypes } from '@/features/MetadataAPI';
+import { allowedMetadataTypes } from '../../../MetadataAPI';
 
 import { AccessType, QueryType } from '../../types';
 import { PermissionsSchema } from '../../schema';
-import { createInsertArgs } from './utils';
+import { createInsertArgs, ExistingPermission } from './utils';
+import { Table } from '../../../hasura-metadata-types';
 
 interface CreateBodyArgs {
   dataSourceName: string;
-  table: unknown;
-  roleName: string;
+  table: Table;
+  role: string;
   resourceVersion: number;
 }
 
@@ -20,7 +21,7 @@ const createDeleteBody = ({
   driver,
   dataSourceName,
   table,
-  roleName,
+  role,
   resourceVersion,
   queries,
 }: CreateDeleteBodyArgs): {
@@ -33,7 +34,7 @@ const createDeleteBody = ({
     type: `${driver}_drop_${queryType}_permission` as allowedMetadataTypes,
     args: {
       table,
-      role: roleName,
+      role,
       source: dataSourceName,
     },
   }));
@@ -103,8 +104,12 @@ interface CreateInsertBodyArgs extends CreateBodyArgs {
   queryType: QueryType;
   formData: PermissionsSchema;
   accessType: AccessType;
-  existingPermissions: any;
+  existingPermissions: ExistingPermission[];
   driver: string;
+  tables: Table[];
+  dataSourceName: string;
+  table: Table;
+  role: string;
 }
 
 export interface InsertBodyResult {
@@ -117,22 +122,24 @@ const createInsertBody = ({
   dataSourceName,
   table,
   queryType,
-  roleName,
+  role,
   formData,
   accessType,
   resourceVersion,
   existingPermissions,
   driver,
+  tables,
 }: CreateInsertBodyArgs): InsertBodyResult => {
   const args = createInsertArgs({
     driver,
     dataSourceName,
     table,
     queryType,
-    role: roleName,
+    role,
     formData,
     accessType,
     existingPermissions,
+    tables,
   });
 
   const formBody = {

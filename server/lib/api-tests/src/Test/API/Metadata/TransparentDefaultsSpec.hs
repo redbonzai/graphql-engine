@@ -28,8 +28,8 @@ spec =
     )
     tests
 
-tests :: Fixture.Options -> SpecWith TestEnvironment
-tests _ = do
+tests :: SpecWith TestEnvironment
+tests = do
   describe "properties of metadata in the presence of defaults" do
     describe "without metadata modifications" do
       -- Note that this requires that the foobar agent is running. Reuses sqlite service.
@@ -39,7 +39,7 @@ tests _ = do
             expected =
               [yaml|
             builtin: false
-            display_name: "FOOBARDB (foobar)"
+            display_name: "FOOBARDB"
             kind: foobar
             available: true
           |]
@@ -48,7 +48,8 @@ tests _ = do
       it "does not include defaults on stand alone export" \testEnvironment -> do
         response <- postMetadata testEnvironment exportMetadata
         let response' = Object $ response CL.^. AL.key "metadata" . AL._Object & CL.sans "sources"
-            expected = [yaml| version: 3 |] -- Doesn't include defaults
+            expected = [yaml| version: 3 |]
+        -- Doesn't include defaults
         response' `shouldBe` expected
 
     describe "with metadata modifications" do
@@ -58,7 +59,8 @@ tests _ = do
 
         response <- postMetadata testEnvironment exportMetadata
         let response' = Object $ response CL.^. AL.key "metadata" . AL._Object & CL.sans "sources"
-            expected = [yaml| version: 3 |] -- Shouldn't include defaults
+            expected = [yaml| version: 3 |]
+        -- Shouldn't include defaults
         response' `shouldBe` expected
 
 exportMetadata :: Value
@@ -79,7 +81,7 @@ addSource =
       name: myfoobar
       replace_configuration: false
       configuration:
-        db: /db.chinook.sqlite
+        value: {}
   |]
 
 listSourceKinds :: Value

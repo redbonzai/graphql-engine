@@ -41,16 +41,13 @@ import { isEmpty } from '../../Common/utils/jsUtils';
 import { currentDriver, dataSource } from '../../../dataSources';
 import { exportMetadata } from '../../../metadata/actions';
 import {
+  getCurrentSourceNamingConvention,
   getTablesFromAllSources,
   getTablesInfoSelector,
 } from '../../../metadata/selector';
 import { getRunSqlQuery } from '../../Common/utils/v1QueryUtils';
 import { services } from '../../../dataSources/services';
 import insertReducer from './TableInsertItem/InsertActions';
-import {
-  checkFeatureSupport,
-  READ_ONLY_RUN_SQL_QUERIES,
-} from '../../../helpers/versionUtils';
 import { FiRefreshCw } from 'react-icons/fi';
 
 const SET_TABLE = 'Data/SET_TABLE';
@@ -133,7 +130,8 @@ const setUntrackedRelations = () => (dispatch, getState) => {
   const untrackedRelations = getAllUnTrackedRelations(
     getState().tables.allSchemas,
     getState().tables.currentSchema,
-    getState().tables.currentDataSource
+    getState().tables.currentDataSource,
+    getCurrentSourceNamingConvention(getState())
   ).bulkRelTrack;
 
   dispatch({
@@ -281,8 +279,7 @@ const loadSchema = (configOptions = {}) => {
               '',
               {
                 action: body.args,
-                message:
-                  'Click "Details" to see more information about the request',
+                message: 'See details about the slowly running queries below',
               }
             )
           );
@@ -1077,7 +1074,7 @@ export const fetchTableIndexDetails = tableInfo => {
       dataSource.tableIndexSql({ table, schema }),
       currentDataSource,
       false,
-      checkFeatureSupport(READ_ONLY_RUN_SQL_QUERIES) || false
+      true
     );
     const options = {
       credentials: globalCookiePolicy,

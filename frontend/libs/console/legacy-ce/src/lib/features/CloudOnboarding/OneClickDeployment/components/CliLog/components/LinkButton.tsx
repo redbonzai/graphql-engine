@@ -1,20 +1,22 @@
 import React, { ReactElement } from 'react';
-import { Button } from '@/new-components/Button';
+import { Button } from '../../../../../../new-components/Button';
 
 export type LinkButtonProps = {
   url: string;
   buttonText: string;
   icon?: ReactElement;
   iconPosition?: 'start' | 'end';
+  id?: string;
 };
 
 export function LinkButton(props: LinkButtonProps) {
-  const { url, buttonText, icon, iconPosition } = props;
+  const { id, url, buttonText, icon, iconPosition } = props;
   return (
     <a href={url} target="_blank" rel="noopener noreferrer">
       <Button
+        id={id}
         mode="default"
-        className="mr-sm bg-none bg-transparent border-red-500"
+        className="mr-sm bg-none !bg-transparent border-red-500"
         icon={icon}
         iconPosition={iconPosition}
       >

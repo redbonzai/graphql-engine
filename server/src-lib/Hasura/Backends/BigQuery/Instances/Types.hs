@@ -10,18 +10,15 @@ import Hasura.Backends.BigQuery.Source qualified as BigQuery
 import Hasura.Backends.BigQuery.ToQuery ()
 import Hasura.Backends.BigQuery.Types qualified as BigQuery
 import Hasura.Base.Error
-import Hasura.NativeQuery.Types
 import Hasura.Prelude
 import Hasura.RQL.Types.Backend
-import Hasura.RQL.Types.ResizePool (ServerReplicas)
-import Hasura.SQL.Backend
+import Hasura.RQL.Types.BackendType
+import Hasura.RQL.Types.ResizePool (ServerReplicas, SourceResizePoolSummary, noPoolsResizedSummary)
 import Language.GraphQL.Draft.Syntax qualified as G
 
 instance Backend 'BigQuery where
   type BackendConfig 'BigQuery = ()
   type BackendInfo 'BigQuery = ()
-  type SourceConfig 'BigQuery = BigQuery.BigQuerySourceConfig
-  type SourceConnConfiguration 'BigQuery = BigQuery.BigQueryConnSourceConfig
   type TableName 'BigQuery = BigQuery.TableName
   type FunctionName 'BigQuery = BigQuery.FunctionName
   type RawFunctionInfo 'BigQuery = BigQuery.RestRoutine
@@ -40,6 +37,7 @@ instance Backend 'BigQuery where
   type FunctionArgumentExp 'BigQuery = BigQuery.ArgumentExp
   type ComputedFieldImplicitArguments 'BigQuery = BigQuery.ComputedFieldImplicitArguments
   type ComputedFieldReturn 'BigQuery = BigQuery.ComputedFieldReturn
+  type ExecutionStatistics 'BigQuery = BigQuery.ExecutionStatistics
 
   type XStreamingSubscription 'BigQuery = XDisable
   type XComputedField 'BigQuery = XEnable
@@ -110,11 +108,16 @@ instance Backend 'BigQuery where
     -- We don't have to generate arguments expression from implicit arguments.
     []
 
-  resizeSourcePools :: SourceConfig 'BigQuery -> ServerReplicas -> IO ()
+  resizeSourcePools :: SourceConfig 'BigQuery -> ServerReplicas -> IO SourceResizePoolSummary
   resizeSourcePools _sourceConfig _serverReplicas =
     -- BigQuery does not posses connection pooling
-    pure ()
+    pure noPoolsResizedSummary
 
   defaultTriggerOnReplication = Nothing
 
-instance NativeQueryMetadata 'BigQuery
+instance HasSourceConfiguration 'BigQuery where
+  type SourceConfig 'BigQuery = BigQuery.BigQuerySourceConfig
+  type SourceConnConfiguration 'BigQuery = BigQuery.BigQueryConnSourceConfig
+  sourceConfigNumReadReplicas = const 0 -- not supported
+  sourceConfigConnectonTemplateEnabled = const False -- not supported
+  sourceConfigBackendSourceKind _sourceConfig = BigQueryKind

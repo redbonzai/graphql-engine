@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Table } from '@/features/hasura-metadata-types';
-import { Button } from '@/new-components/Button';
-import { useFireNotification } from '@/new-components/Notifications';
+import { useState, useEffect } from 'react';
+import { Table } from '../hasura-metadata-types';
+import { Button } from '../../new-components/Button';
+import { useFireNotification } from '../../new-components/Notifications';
 import { FaPlusCircle } from 'react-icons/fa';
 import Legend from './components/Legend';
 import { SuggestedRelationships } from './components/SuggestedRelationships/SuggestedRelationships';
@@ -9,6 +9,7 @@ import { MODE, Relationship } from './types';
 import { AvailableRelationshipsList } from './components/AvailableRelationshipsList/AvailableRelationshipsList';
 import { NOTIFICATIONS } from './components/constants';
 import { RenderWidget } from './components/RenderWidget/RenderWidget';
+import { useInvalidateMetadata } from '../hasura-metadata-api';
 
 export interface DatabaseRelationshipsProps {
   dataSourceName: string;
@@ -28,6 +29,8 @@ export const DatabaseRelationships = ({
   });
   const { fireNotification } = useFireNotification();
 
+  const invalidateMetadata = useInvalidateMetadata();
+
   const onCancel = () => {
     setTabState({
       mode: undefined,
@@ -35,11 +38,17 @@ export const DatabaseRelationships = ({
     });
   };
 
+  // just invalidate metadata when this screen loads for the first time
+  // why? because the user might be coming from a redux based paged and the resource_version might gone out of sync
+  useEffect(() => {
+    invalidateMetadata();
+  }, [invalidateMetadata]);
+
   const onError = (err: Error) => {
     if (mode)
       fireNotification({
         type: 'error',
-        title: NOTIFICATIONS.onSuccess[mode],
+        title: NOTIFICATIONS.onError[mode],
         message: err?.message ?? '',
       });
   };

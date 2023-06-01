@@ -4,24 +4,27 @@
 --
 -- NOTE: This module is intended to be imported qualified.
 module Harness.Backend.DataConnector.Chinook.Sqlite
-  ( agentConfig,
-    sourceConfiguration,
-    backendTypeMetadata,
-    formatForeignKeyName,
+  ( backendTypeConfig,
+    mkChinookCloneTestEnvironment,
+    chinookFixture,
   )
 where
 
 --------------------------------------------------------------------------------
 
-import Data.Aeson qualified as Aeson
+import Control.Monad.Managed (Managed)
+import Harness.Backend.DataConnector.Chinook (ChinookTestEnv, NameFormatting (..), ScalarTypes (..))
+import Harness.Backend.DataConnector.Chinook qualified as Chinook
 import Harness.Quoter.Yaml (yaml)
 import Harness.Test.BackendType qualified as BackendType
+import Harness.Test.Fixture (Fixture (..), FixtureName (..))
+import Harness.TestEnvironment
 import Hasura.Prelude
 
 --------------------------------------------------------------------------------
 
-backendTypeMetadata :: BackendType.BackendTypeConfig
-backendTypeMetadata =
+backendTypeConfig :: BackendType.BackendTypeConfig
+backendTypeConfig =
   BackendType.BackendTypeConfig
     { backendType = BackendType.DataConnectorSqlite,
       backendSourceName = "chinook_sqlite",
@@ -77,45 +80,59 @@ backendTypeMetadata =
                   _nand: bool
                   _xor: bool
                 graphql_type: Boolean
-            queries: {}
+            queries:
+              foreach: {}
             relationships: {}
             comparisons:
               subquery:
                 supports_relations: true
             explain: {}
+            mutations:
+              atomicity_support_level: heterogeneous_operations
+              delete: {}
+              insert:
+                supports_nested_inserts: true
+              returning: {}
+              update: {}
             metrics: {}
             raw: {}
         |],
       backendTypeString = "sqlite",
-      backendDisplayNameString = "Hasura SQLite (sqlite)",
+      backendDisplayNameString = "Hasura SQLite",
+      backendReleaseNameString = Nothing,
       backendServerUrl = Just "http://localhost:65007",
-      backendSchemaKeyword = "schema"
+      backendSchemaKeyword = "schema",
+      backendScalarType = const ""
     }
 
 --------------------------------------------------------------------------------
 
--- | Reference Agent @backend_configs@ field.
-agentConfig :: Aeson.Value
-agentConfig =
-  let backendType = BackendType.backendTypeString backendTypeMetadata
-   in [yaml|
-dataconnector:
-  *backendType:
-    uri: "http://127.0.0.1:65007/"
-|]
+mkChinookCloneTestEnvironment :: TestEnvironment -> Managed ChinookTestEnv
+mkChinookCloneTestEnvironment = Chinook.mkChinookCloneTestEnvironment nameFormatting scalarTypes
 
--- | Sqlite Agent specific @sources@ entry @configuration@ field.
-sourceConfiguration :: Aeson.Value
-sourceConfiguration =
-  [yaml|
-value:
-  db: "/db.chinook.sqlite"
-template:
-timeout:
-|]
+nameFormatting :: NameFormatting
+nameFormatting = NameFormatting id id formatForeignKeyName
 
 -- | Construct foreign key relationship names.
 formatForeignKeyName :: Text -> Text
 formatForeignKeyName = \case
-  "Artist" -> "ArtistId->Artist.ArtistId"
+  "Artist" -> "Album.ArtistId->Artist.ArtistId"
   x -> x
+
+scalarTypes :: ScalarTypes
+scalarTypes =
+  ScalarTypes
+    { _stFloatType = "number",
+      _stIntegerType = "number",
+      _stStringType = "string"
+    }
+
+chinookFixture :: Fixture ChinookTestEnv
+chinookFixture =
+  Fixture
+    { name = Backend backendTypeConfig,
+      mkLocalTestEnvironment = mkChinookCloneTestEnvironment,
+      setupTeardown = \testEnvs ->
+        [Chinook.setupChinookSourceAction testEnvs],
+      customOptions = Nothing
+    }
