@@ -8,6 +8,8 @@ module Harness.GlobalTestEnvironment
     Server (..),
     TestingMode (..),
     serverUrl,
+    GlobalFlags (..),
+    defaultGlobalFlags,
   )
 where
 
@@ -20,12 +22,12 @@ import Harness.Logging.Messages
 import Harness.Services.Composed qualified as Services
 import Harness.Test.BackendType
 import Hasura.Prelude
-import Network.WebSockets qualified as WS
 
 -- | static information across an entire test suite run
 data GlobalTestEnvironment = GlobalTestEnvironment
   { -- | shared function to log information from tests
     logger :: Logger,
+    globalFlags :: GlobalFlags,
     -- | the mode in which we're running the tests. See 'TestingMode' for
     -- details'.
     testingMode :: TestingMode,
@@ -45,10 +47,6 @@ instance Has Services.TestServicesConfig GlobalTestEnvironment where
   modifier f x = x {servicesConfig = f (servicesConfig x)}
 
 instance Has Services.HgeBinPath GlobalTestEnvironment where
-  getter = getter . getter @Services.TestServicesConfig
-  modifier f = modifier (modifier @_ @Services.TestServicesConfig f)
-
-instance Has Services.DcPgBinPath GlobalTestEnvironment where
   getter = getter . getter @Services.TestServicesConfig
   modifier f = modifier (modifier @_ @Services.TestServicesConfig f)
 
@@ -75,17 +73,13 @@ instance Has Services.HgeServerInstance GlobalTestEnvironment where
 
   modifier = error "GlobalTestEnvironment does not support modifying HgeServerInstance"
 
-instance Has Services.DcPgPool GlobalTestEnvironment where
-  getter = getter . getter @Services.TestServicesConfig
-  modifier f = modifier (modifier @_ @Services.TestServicesConfig f)
-
 instance Show GlobalTestEnvironment where
   show GlobalTestEnvironment {server} =
     "<GlobalTestEnvironment: " ++ urlPrefix server ++ ":" ++ show (port server) ++ " >"
 
 -- | How should we make requests to `graphql-engine`? Both WebSocket- and HTTP-
 -- based requests are supported.
-data Protocol = HTTP | WebSocket WS.Connection
+data Protocol = HTTP | WebSocket
 
 -- | Credentials for our testing modes. See 'SpecHook.setupTestingMode' for the
 -- practical consequences of this type.
@@ -122,3 +116,15 @@ instance Show Server where
 -- @
 serverUrl :: Server -> String
 serverUrl Server {urlPrefix, port} = urlPrefix ++ ":" ++ show port
+
+-- | Persistent flags throughout the program.
+data GlobalFlags = GlobalFlags
+  { -- | Trace commands sent via graphql.
+    gfTraceCommands :: Bool
+  }
+
+defaultGlobalFlags :: GlobalFlags
+defaultGlobalFlags =
+  GlobalFlags
+    { gfTraceCommands = False
+    }

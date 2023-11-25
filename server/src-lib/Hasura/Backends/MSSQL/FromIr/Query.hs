@@ -342,8 +342,7 @@ fromNativeQuery :: IR.NativeQuery 'MSSQL Expression -> FromIr TSQL.From
 fromNativeQuery nativeQuery = do
   let nativeQueryName = IR.nqRootFieldName nativeQuery
       nativeQuerySql = IR.nqInterpolatedQuery nativeQuery
-      cteName = T.toTxt (getNativeQueryName nativeQueryName)
-  tellCTE (Aliased nativeQuerySql cteName)
+  cteName <- tellCTE nativeQueryName nativeQuerySql
   pure $ TSQL.FromIdentifier cteName
 
 fromStoredProcedure :: IR.StoredProcedure 'MSSQL Expression -> FromIr TSQL.From
@@ -383,13 +382,13 @@ fromStoredProcedure storedProcedure = do
           <$> InsOrdHashMap.toList (columnsFromFields $ lmFields storedProcedureReturnType)
 
   -- \| add create temp table to "the environment"
-  tellBefore (CreateTemp (TempTableName rawTempTableName) columns)
+  tellBefore (TempTableCreate (TempTableName rawTempTableName) columns)
 
   -- \| add insert into temp table
-  tellBefore (InsertTemp declares (TempTableName rawTempTableName) sql)
+  tellBefore (TempTableInsert (TempTableName rawTempTableName) declares sql)
 
   -- \| when we're done, drop the temp table
-  tellAfter (DropTemp (TempTableName rawTempTableName))
+  tellAfter (TempTableDrop (TempTableName rawTempTableName))
 
   pure $ TSQL.FromTempTable aliasedTempTableName
 
@@ -429,7 +428,7 @@ fromSelectAggregate
       expss :: [(Int, Projection)] <- flip runReaderT (fromAlias selectFrom) $ sequence $ mapMaybe fromTableExpFieldG fields
       nodes :: [(Int, (IR.FieldName, [FieldSource]))] <-
         flip runReaderT (fromAlias selectFrom) $ sequence $ mapMaybe (fromTableNodesFieldG argsExistingJoins) fields
-      let aggregates :: [(Int, (IR.FieldName, [Projection]))] = mapMaybe fromTableAggFieldG fields
+      aggregates :: [(Int, (IR.FieldName, [Projection]))] <- flip runReaderT (EntityAlias aggSubselectName) $ sequence $ mapMaybe fromTableAggFieldG fields
       pure
         emptySelect
           { selectProjections =
@@ -553,14 +552,14 @@ fromTableExpFieldG = \case
 
 fromTableAggFieldG ::
   (Int, (IR.FieldName, IR.TableAggregateFieldG 'MSSQL Void Expression)) ->
-  Maybe (Int, (IR.FieldName, [Projection]))
+  Maybe (ReaderT EntityAlias FromIr (Int, (IR.FieldName, [Projection])))
 fromTableAggFieldG = \case
   (index, (fieldName, IR.TAFAgg (aggregateFields :: [(IR.FieldName, IR.AggregateField 'MSSQL Expression)]))) ->
-    Just
-      $ let aggregates =
-              aggregateFields <&> \(fieldName', aggregateField) ->
-                fromAggregateField (IR.getFieldNameTxt fieldName') aggregateField
-         in (index, (fieldName, aggregates))
+    Just $ do
+      aggregates <-
+        forM aggregateFields \(fieldName', aggregateField) ->
+          fromAggregateField (IR.getFieldNameTxt fieldName') aggregateField
+      pure (index, (fieldName, aggregates))
   _ -> Nothing
 
 fromTableNodesFieldG ::
@@ -573,35 +572,49 @@ fromTableNodesFieldG argsExistingJoins = \case
     pure (index, (fieldName, fieldSources'))
   _ -> Nothing
 
-fromAggregateField :: Text -> IR.AggregateField 'MSSQL Expression -> Projection
+fromAggregateField :: Text -> IR.AggregateField 'MSSQL Expression -> ReaderT EntityAlias FromIr Projection
 fromAggregateField alias aggregateField =
   case aggregateField of
-    IR.AFExp text -> AggregateProjection $ Aliased (TextAggregate text) alias
-    IR.AFCount countType -> AggregateProjection . flip Aliased alias . CountAggregate $ case countType of
-      StarCountable -> StarCountable
-      NonNullFieldCountable name -> NonNullFieldCountable $ columnFieldAggEntity name
-      DistinctCountable name -> DistinctCountable $ columnFieldAggEntity name
-    IR.AFOp IR.AggregateOp {_aoOp = op, _aoFields = fields} ->
-      let projections :: [Projection] =
-            fields <&> \(fieldName, columnField) ->
-              case columnField of
-                IR.SFCol column _columnType ->
-                  let fname = columnFieldAggEntity column
-                   in AggregateProjection $ Aliased (OpAggregate op [ColumnExpression fname]) (IR.getFieldNameTxt fieldName)
-                IR.SFExp text ->
-                  ExpressionProjection $ Aliased (ValueExpression (ODBC.TextValue text)) (IR.getFieldNameTxt fieldName)
-                -- See Hasura.RQL.Types.Backend.supportsAggregateComputedFields
-                IR.SFComputedField _ _ -> error "Aggregate computed fields aren't currently supported for MSSQL!"
-       in ExpressionProjection
-            $ flip Aliased alias
-            $ safeJsonQueryExpression JsonSingleton
-            $ SelectExpression
-            $ emptySelect
-              { selectProjections = projections,
-                selectFor = JsonFor $ ForJson JsonSingleton NoRoot
-              }
+    IR.AFExp text -> pure $ AggregateProjection $ Aliased (TextAggregate text) alias
+    IR.AFCount countType ->
+      AggregateProjection . flip Aliased alias . CountAggregate <$> case getCountType countType of
+        StarCountable -> pure StarCountable
+        NonNullFieldCountable (name, redactionExp) -> do
+          ex <- potentiallyRedacted redactionExp (ColumnExpression (columnFieldAggEntity name))
+          pure $ NonNullFieldCountable ex
+        DistinctCountable (name, redactionExp) -> do
+          ex <- potentiallyRedacted redactionExp (ColumnExpression (columnFieldAggEntity name))
+          pure $ DistinctCountable ex
+    IR.AFOp IR.AggregateOp {_aoOp = op, _aoFields = fields} -> do
+      projections :: [Projection] <- forM fields \(fieldName, columnField) ->
+        case columnField of
+          IR.SFCol column _columnType redactionExp -> do
+            let fname = columnFieldAggEntity column
+            colExp <- potentiallyRedacted redactionExp (ColumnExpression fname)
+            pure $ AggregateProjection $ Aliased (OpAggregate op [colExp]) (IR.getFieldNameTxt fieldName)
+          IR.SFExp text ->
+            pure $ ExpressionProjection $ Aliased (ValueExpression (ODBC.TextValue text)) (IR.getFieldNameTxt fieldName)
+          -- See Hasura.RQL.Types.Backend.supportsAggregateComputedFields
+          IR.SFComputedField _ _ -> error "Aggregate computed fields aren't currently supported for MSSQL!"
+      pure
+        $ ExpressionProjection
+        $ flip Aliased alias
+        $ safeJsonQueryExpression JsonSingleton
+        $ SelectExpression
+        $ emptySelect
+          { selectProjections = projections,
+            selectFor = JsonFor $ ForJson JsonSingleton NoRoot
+          }
   where
     columnFieldAggEntity col = columnNameToFieldName col $ EntityAlias aggSubselectName
+
+potentiallyRedacted :: IR.AnnRedactionExp 'MSSQL Expression -> Expression -> ReaderT EntityAlias FromIr Expression
+potentiallyRedacted redactionExp ex = do
+  case redactionExp of
+    IR.NoRedaction -> pure ex
+    IR.RedactIfFalse p -> do
+      condExp <- fromGBoolExp p
+      pure $ ConditionalExpression condExp ex (ValueExpression ODBC.NullValue)
 
 -- | The main sources of fields, either constants, fields or via joins.
 fromAnnFieldsG ::
@@ -655,19 +668,14 @@ fromAnnColumnField annColumnField = do
   -- WKT format
   if typ == (IR.ColumnScalar GeometryType) || typ == (IR.ColumnScalar GeographyType)
     then pure $ MethodApplicationExpression (ColumnExpression fieldName) MethExpSTAsText
-    else case caseBoolExpMaybe of
-      Nothing -> pure (ColumnExpression fieldName)
-      Just ex -> do
-        ex' <- fromGBoolExp (coerce ex)
-        let nullValue = ValueExpression ODBC.NullValue
-        pure (ConditionalExpression ex' (ColumnExpression fieldName) nullValue)
+    else potentiallyRedacted redactionExp (ColumnExpression fieldName)
   where
     IR.AnnColumnField
       { _acfColumn = column,
         _acfType = typ,
         _acfAsText = _asText :: Bool,
         _acfArguments = _ :: Maybe Void,
-        _acfCaseBoolExpression = caseBoolExpMaybe
+        _acfRedactionExpression = redactionExp
       } = annColumnField
 
 -- | This is where a field name "foo" is resolved to a fully qualified
@@ -734,6 +742,7 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
       (const entityAlias)
       (traverse (fromAnnFieldsG mempty) fields)
   let selectProjections = map fieldSourceProjections fieldSources
+
   joinJoinAlias <-
     do
       fieldName <- lift (fromRelName _aarRelationshipName)
@@ -743,15 +752,37 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
           { joinAliasEntity = alias,
             joinAliasField = pure jsonFieldName
           }
+
   let selectFor =
         JsonFor ForJson {jsonCardinality = JsonSingleton, jsonRoot = NoRoot}
+
   filterExpression <- local (const entityAlias) (fromGBoolExp tableFilter)
+
+  -- if the object select should be non-nullable we push an extra 'where'
+  -- for the outer `select` that checks the value is not `null`
+  let joinWhere = case nullable of
+        IR.Nullable -> mempty
+        IR.NotNullable ->
+          Where
+            [ IsNotNullExpression
+                ( JsonQueryExpression
+                    ( ColumnExpression
+                        ( FieldName
+                            { fieldName = jsonFieldName,
+                              fieldNameEntity = joinAliasEntity joinJoinAlias
+                            }
+                        )
+                    )
+                )
+            ]
+
   case eitherAliasOrFrom of
     Right selectFrom -> do
       foreignKeyConditions <- fromMapping selectFrom mapping
       pure
         Join
           { joinJoinAlias,
+            joinWhere,
             joinSource =
               JoinSelect
                 emptySelect
@@ -770,6 +801,7 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
       pure
         Join
           { joinJoinAlias,
+            joinWhere,
             joinSource =
               JoinReselect
                 Reselect
@@ -787,7 +819,8 @@ fromObjectRelationSelectG existingJoins annRelationSelectG = do
     IR.AnnRelationSelectG
       { _aarRelationshipName,
         _aarColumnMapping = mapping :: HashMap ColumnName ColumnName,
-        _aarAnnSelect = annObjectSelectG :: IR.AnnObjectSelectG 'MSSQL Void Expression
+        _aarAnnSelect = annObjectSelectG :: IR.AnnObjectSelectG 'MSSQL Void Expression,
+        _aarNullable = nullable
       } = annRelationSelectG
 
 lookupTableFrom ::
@@ -834,6 +867,7 @@ fromArrayAggregateSelectG annRelationSelectG = do
             { joinAliasEntity = alias,
               joinAliasField = pure jsonFieldName
             },
+        joinWhere = mempty,
         joinSource = JoinSelect joinSelect
       }
   where
@@ -860,6 +894,7 @@ fromArrayRelationSelectG annRelationSelectG = do
             { joinAliasEntity = alias,
               joinAliasField = pure jsonFieldName
             },
+        joinWhere = mempty,
         joinSource = JoinSelect joinSelect
       }
   where
@@ -932,7 +967,7 @@ fromAnnotatedOrderByItemG ::
   IR.AnnotatedOrderByItemG 'MSSQL Expression ->
   WriterT (Seq UnfurledJoin) (ReaderT EntityAlias FromIr) OrderBy
 fromAnnotatedOrderByItemG IR.OrderByItemG {obiType, obiColumn = obiColumn, obiNulls} = do
-  (orderByFieldName, orderByType) <- unfurlAnnotatedOrderByElement obiColumn
+  (orderByExpression, orderByType) <- unfurlAnnotatedOrderByElement obiColumn
   let orderByNullsOrder = fromMaybe NullsAnyOrder obiNulls
       orderByOrder = fromMaybe AscOrder obiType
   pure OrderBy {..}
@@ -942,33 +977,34 @@ fromAnnotatedOrderByItemG IR.OrderByItemG {obiType, obiColumn = obiColumn, obiNu
 -- IR.AOCArrayAggregation).
 unfurlAnnotatedOrderByElement ::
   IR.AnnotatedOrderByElement 'MSSQL Expression ->
-  WriterT (Seq UnfurledJoin) (ReaderT EntityAlias FromIr) (FieldName, Maybe TSQL.ScalarType)
+  WriterT (Seq UnfurledJoin) (ReaderT EntityAlias FromIr) (Expression, Maybe TSQL.ScalarType)
 unfurlAnnotatedOrderByElement =
   \case
-    IR.AOCColumn columnInfo -> do
+    IR.AOCColumn columnInfo redactionExp -> do
       fieldName <- lift (fromColumnInfo columnInfo)
+      ex <- lift $ potentiallyRedacted redactionExp (ColumnExpression fieldName)
       pure
-        ( fieldName,
+        ( ex,
           case IR.ciType columnInfo of
             IR.ColumnScalar t -> Just t
             -- Above: It is of interest to us whether the type is
             -- text/ntext/image. See ToQuery for more explanation.
             _ -> Nothing
         )
-    IR.AOCObjectRelation IR.RelInfo {riMapping = mapping, riTarget = IR.RelTargetNativeQuery nativeQueryName} annBoolExp annOrderByElementG -> do
+    IR.AOCObjectRelation IR.RelInfo {riMapping = IR.RelMapping mapping, riTarget = IR.RelTargetNativeQuery nativeQueryName} annBoolExp annOrderByElementG -> do
       let name = T.toTxt (getNativeQueryName nativeQueryName)
           selectFrom = TSQL.FromIdentifier name
       joinAliasEntity <-
         lift (lift (generateAlias (ForOrderAlias name)))
       genObjectRelation mapping annBoolExp annOrderByElementG joinAliasEntity selectFrom (Left nativeQueryName)
-    IR.AOCObjectRelation IR.RelInfo {riMapping = mapping, riTarget = IR.RelTargetTable table} annBoolExp annOrderByElementG -> do
+    IR.AOCObjectRelation IR.RelInfo {riMapping = IR.RelMapping mapping, riTarget = IR.RelTargetTable table} annBoolExp annOrderByElementG -> do
       selectFrom <- lift (lift (fromQualifiedTable table))
       joinAliasEntity <-
         lift (lift (generateAlias (ForOrderAlias (tableNameText table))))
       genObjectRelation mapping annBoolExp annOrderByElementG joinAliasEntity selectFrom (Right table)
     IR.AOCArrayAggregation IR.RelInfo {riTarget = IR.RelTargetNativeQuery _} _annBoolExp _annAggregateOrderBy ->
       error "unfurlAnnotatedOrderByElement RelTargetNativeQuery"
-    IR.AOCArrayAggregation IR.RelInfo {riMapping = mapping, riTarget = IR.RelTargetTable tableName} annBoolExp annAggregateOrderBy -> do
+    IR.AOCArrayAggregation IR.RelInfo {riMapping = IR.RelMapping mapping, riTarget = IR.RelTargetTable tableName} annBoolExp annAggregateOrderBy -> do
       selectFrom <- lift (lift (fromQualifiedTable tableName))
       let alias = aggFieldName
       joinAliasEntity <-
@@ -982,9 +1018,10 @@ unfurlAnnotatedOrderByElement =
               (const (fromAlias selectFrom))
               ( case annAggregateOrderBy of
                   IR.AAOCount -> pure (CountAggregate StarCountable)
-                  IR.AAOOp text _resultType columnInfo -> do
+                  IR.AAOOp (IR.AggregateOrderByColumn text _resultType columnInfo redactionExp) -> do
                     fieldName <- fromColumnInfo columnInfo
-                    pure (OpAggregate text (pure (ColumnExpression fieldName)))
+                    ex <- potentiallyRedacted redactionExp (ColumnExpression fieldName)
+                    pure (OpAggregate text (pure ex))
               )
           )
       tell
@@ -1012,6 +1049,7 @@ unfurlAnnotatedOrderByElement =
                                 selectOrderBy = Nothing,
                                 selectOffset = Nothing
                               },
+                        joinWhere = mempty,
                         joinJoinAlias =
                           JoinAlias {joinAliasEntity, joinAliasField = Nothing}
                       },
@@ -1020,7 +1058,7 @@ unfurlAnnotatedOrderByElement =
             )
         )
       pure
-        ( FieldName {fieldNameEntity = joinAliasEntity, fieldName = alias},
+        ( ColumnExpression $ FieldName {fieldNameEntity = joinAliasEntity, fieldName = alias},
           Nothing
         )
   where
@@ -1054,6 +1092,7 @@ unfurlAnnotatedOrderByElement =
                               selectOrderBy = Nothing,
                               selectOffset = Nothing
                             },
+                      joinWhere = mempty,
                       joinJoinAlias =
                         JoinAlias {joinAliasEntity, joinAliasField = Nothing}
                     },

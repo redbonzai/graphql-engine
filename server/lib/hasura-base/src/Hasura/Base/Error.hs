@@ -10,7 +10,6 @@ module Hasura.Base.Error
     showQErr,
     encodeQErr,
     encodeGQLErr,
-    noInternalQErrEnc,
     err400,
     err404,
     err405,
@@ -28,7 +27,6 @@ module Hasura.Base.Error
     throw429,
     throw500,
     throw500WithDetail,
-    throwConnectionError,
     throw401,
     iResultToMaybe,
     -- Aeson helpers
@@ -54,14 +52,13 @@ module Hasura.Base.Error
     qeInternalLens,
     _ExtraExtensions,
     _ExtraInternal,
-    _HideInconsistencies,
   )
 where
 
 import Control.Arrow.Extended
 import Control.Lens (makeLensesFor, makePrisms)
 import Data.Aeson
-import Data.Aeson.Internal
+import Data.Aeson.Encoding qualified as J
 import Data.Aeson.Key qualified as K
 import Data.Aeson.Types
 import Data.Parser.JSONPath (encodeJSONPath)
@@ -186,33 +183,37 @@ data QErr = QErr
 data QErrExtra
   = ExtraExtensions Value
   | ExtraInternal Value
-  | HideInconsistencies
   deriving (Eq)
 
 instance ToJSON QErrExtra where
   toJSON = \case
     ExtraExtensions v -> v
     ExtraInternal v -> v
-    HideInconsistencies -> Null
 
 instance ToJSON QErr where
-  toJSON (QErr jPath _ msg code Nothing) =
-    object
-      [ "path" .= encodeJSONPath jPath,
-        "error" .= msg,
-        "code" .= code
-      ]
-  toJSON (QErr jPath _ msg code (Just extra)) = object
-    $ case extra of
-      ExtraInternal e -> err ++ ["internal" .= e]
-      ExtraExtensions {} -> err
-      HideInconsistencies -> []
+  toJSON (QErr jPath _ msg code extra) =
+    object $ case extra of
+      Just (ExtraInternal e) -> "internal" .= e : err
+      Just ExtraExtensions {} -> err
+      Nothing -> err
     where
       err =
-        [ "path" .= encodeJSONPath jPath,
-          "error" .= msg,
+        [ "error" .= msg,
+          "path" .= encodeJSONPath jPath,
           "code" .= code
         ]
+  toEncoding (QErr jPath _ msg code extra) =
+    pairs $ case extra of
+      Just (ExtraInternal e) -> err <> "internal" .= e -- Internal comes after all other properties so is the last thing the user sees
+      Just ExtraExtensions {} -> err
+      Nothing -> err
+    where
+      err =
+        -- error property comes first so the error message is the first
+        -- thing the user sees
+        ("error" .= msg)
+          <> ("path" .= encodeJSONPath jPath)
+          <> ("code" .= code)
 
 -- | Overrides the status and code of a QErr while retaining all other fields.
 overrideQErrStatus :: HTTP.Status -> Code -> QErr -> QErr
@@ -226,41 +227,31 @@ prefixQErr prefix err = err {qeError = prefix <> qeError err}
 showQErr :: QErr -> Text
 showQErr = TL.toStrict . TL.decodeUtf8 . encode
 
-noInternalQErrEnc :: QErr -> Value
-noInternalQErrEnc (QErr jPath _ msg code _) =
-  object
-    [ "path" .= encodeJSONPath jPath,
-      "error" .= msg,
-      "code" .= code
-    ]
-
-encodeGQLErr :: Bool -> QErr -> Value
+encodeGQLErr :: Bool -> QErr -> Encoding
 encodeGQLErr includeInternal (QErr jPath _ msg code maybeExtra) =
-  object
-    [ "message" .= msg,
-      "extensions" .= extnsObj
-    ]
+  pairs (("message" .= msg) <> (J.pair "extensions" extnsObj))
   where
-    appendIf cond a b = if cond then a ++ b else a
+    appendIf cond a b = if cond then a <> b else a
 
     extnsObj = case maybeExtra of
-      Nothing -> object codeAndPath
+      Nothing -> pairs codeAndPath
       -- if an `extensions` key is given in the error response from the webhook,
       -- we ignore the `code` key regardless of whether the `extensions` object
       -- contains a `code` field:
-      Just (ExtraExtensions v) -> v
+      Just (ExtraExtensions v) -> toEncoding v
       Just (ExtraInternal v) ->
-        object $ appendIf includeInternal codeAndPath ["internal" .= v]
-      Just HideInconsistencies -> Null
+        pairs $ appendIf includeInternal codeAndPath ("internal" .= v)
     codeAndPath =
-      [ "path" .= encodeJSONPath jPath,
-        "code" .= code
-      ]
+      ("path" .= encodeJSONPath jPath)
+        <> ("code" .= code)
 
 -- whether internal should be included or not
-encodeQErr :: Bool -> QErr -> Value
-encodeQErr True = toJSON
-encodeQErr _ = noInternalQErrEnc
+encodeQErr :: Bool -> QErr -> Encoding
+encodeQErr True = toEncoding
+encodeQErr False = toEncoding . removeInternalErr
+  where
+    removeInternalErr :: QErr -> QErr
+    removeInternalErr err = err {qeInternal = Nothing}
 
 -- Postgres Connection Errors
 instance PG.FromPGConnErr QErr where
@@ -343,14 +334,6 @@ internalError = err500 Unexpected
 throw500WithDetail :: (QErrM m) => Text -> Value -> m a
 throw500WithDetail t detail =
   throwError $ (err500 Unexpected t) {qeInternal = Just $ ExtraInternal detail}
-
-throwConnectionError :: (QErrM m) => Text -> m a
-throwConnectionError t =
-  throwError
-    $ (err500 Unexpected t)
-      { qeInternal = Just HideInconsistencies,
-        qeCode = ConnectionNotEstablished
-      }
 
 modifyQErr ::
   (QErrM m) =>

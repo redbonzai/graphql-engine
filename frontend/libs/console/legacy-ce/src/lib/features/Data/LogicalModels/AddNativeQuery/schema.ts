@@ -16,12 +16,44 @@ export const schema = implement<NativeQueryForm>().with({
   type: z.enum(['query', 'mutation']).default('query').optional(),
   arguments: z
     .object({
-      name: reqString('Paramater Name'),
+      name: reqString('Parameter Name'),
       type: reqString('Parameter Type'),
-      default_value: z.string().optional(),
-      required: z.boolean().optional(),
+      description: z.string().optional(),
+      nullable: z.boolean().optional(),
     })
     .array(),
   code: reqString('Sql Query'),
   returns: reqString('Query Return Type'),
+  array_relationships: z
+    .array(
+      z.object({
+        name: z.string(),
+        using: z.object({
+          column_mapping: z.record(z.string()),
+          insertion_order: z.union([
+            z.literal('before_parent'),
+            z.literal('after_parent'),
+            z.literal(null),
+          ]),
+          remote_native_query: z.string(),
+        }),
+      })
+    )
+    .optional(),
+  object_relationships: z
+    .array(
+      z.object({
+        name: z.string(),
+        using: z.object({
+          column_mapping: z.record(z.string()),
+          insertion_order: z.union([
+            z.literal('before_parent'),
+            z.literal('after_parent'),
+            z.literal(null),
+          ]),
+          remote_native_query: z.string(),
+        }),
+      })
+    )
+    .optional(),
 });

@@ -10,9 +10,9 @@ import { FaPlusCircle } from 'react-icons/fa';
 import { Button } from '../../../../../new-components/Button';
 import {
   GraphQLSanitizedInputField,
-  InputField,
   Select,
   fieldLabelStyles,
+  InputField,
 } from '../../../../../new-components/Form';
 import { BooleanInput } from '../../components/BooleanInput';
 import { useCardedTableFromReactTableWithRef } from '../../components/CardedTableFromReactTable';
@@ -20,7 +20,13 @@ import { NativeQueryArgumentNormalized, NativeQueryForm } from '../types';
 
 const columnHelper = createColumnHelper<NativeQueryArgumentNormalized>();
 
-export const ArgumentsField = ({ types }: { types: string[] }) => {
+export const ArgumentsField = ({
+  types,
+  noSourceSelected,
+}: {
+  types: string[];
+  noSourceSelected: boolean;
+}) => {
   const { control } = useFormContext<NativeQueryForm>();
 
   const { append, remove, fields } = useFieldArray({
@@ -57,23 +63,26 @@ export const ArgumentsField = ({ types }: { types: string[] }) => {
         ),
         header: 'Type',
       }),
-      columnHelper.accessor('default_value', {
-        id: 'default_value',
+      columnHelper.accessor('description', {
+        id: 'description',
         cell: ({ row }) => (
           <InputField
             noErrorPlaceholder
-            placeholder="Default Value"
-            name={`arguments.${row.index}.default_value`}
+            placeholder="Description"
+            name={`arguments.${row.index}.description`}
           />
         ),
-        header: 'Default Value',
+        header: 'Description',
       }),
-      columnHelper.accessor('required', {
-        id: 'required',
+      columnHelper.accessor('nullable', {
+        id: 'nullable',
         cell: ({ row }) => (
-          <BooleanInput name={`arguments.${row.index}.required`} />
+          <BooleanInput
+            name={`arguments.${row.index}.nullable`}
+            dataTestId="nullable-switch"
+          />
         ),
-        header: 'Required',
+        header: 'Nullable',
       }),
       columnHelper.display({
         id: 'action',
@@ -106,10 +115,13 @@ export const ArgumentsField = ({ types }: { types: string[] }) => {
           <div className={clsx(fieldLabelStyles, 'mb-0')}>Query Parameters</div>
           <Button
             icon={<FaPlusCircle />}
+            disabled={noSourceSelected}
             onClick={() => {
               append({
                 name: '',
                 type: 'text',
+                nullable: false,
+                description: '',
               });
             }}
           >
@@ -119,7 +131,11 @@ export const ArgumentsField = ({ types }: { types: string[] }) => {
         <ArgumentsTableElement
           table={argumentsTable}
           ref={tableRef}
-          noRowsMessage={'No query parameters added.'}
+          noRowsMessage={
+            noSourceSelected
+              ? 'Select a data source to add query arguments'
+              : 'No query parameters added.'
+          }
         />
       </div>
     </div>

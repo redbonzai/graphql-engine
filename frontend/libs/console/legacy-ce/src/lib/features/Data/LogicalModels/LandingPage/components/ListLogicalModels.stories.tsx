@@ -1,7 +1,7 @@
 import { StoryObj, Meta } from '@storybook/react';
 import { buildMetadata } from '../../mocks/metadata';
-import { extractModelsAndQueriesFromMetadata } from '../../utils';
 import { ListLogicalModels } from './ListLogicalModels';
+import { extractModelsAndQueriesFromMetadata } from '../../../../hasura-metadata-api/selectors';
 
 export default {
   component: ListLogicalModels,
@@ -20,10 +20,5 @@ const data = extractModelsAndQueriesFromMetadata(
 export const Basic: StoryObj<typeof ListLogicalModels> = {
   render: args => {
     return <ListLogicalModels {...args} logicalModels={data.models} />;
-  },
-};
-export const Loading: StoryObj<typeof ListLogicalModels> = {
-  render: args => {
-    return <ListLogicalModels {...args} isLoading />;
   },
 };

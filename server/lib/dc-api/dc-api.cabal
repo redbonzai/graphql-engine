@@ -100,6 +100,8 @@ library
     Hasura.Backends.DataConnector.API.V0.Scalar
     Hasura.Backends.DataConnector.API.V0.Schema
     Hasura.Backends.DataConnector.API.V0.Table
+    Hasura.Backends.DataConnector.API.V0.Target
+    Hasura.Backends.DataConnector.API.V0.InterpolatedQuery
     Hasura.Backends.DataConnector.API.V0.Dataset
   other-modules:
     Hasura.Backends.DataConnector.API.V0.Name
@@ -131,7 +133,7 @@ test-suite tests-dc-api
     mtl,
     optparse-applicative,
     scientific,
-    sandwich,
+    sandwich >= 0.1.3.0,
     servant,
     servant-client,
     servant-client-core,
@@ -162,6 +164,7 @@ test-suite tests-dc-api
     Test.Specs.CapabilitiesSpec
     Test.Specs.ErrorSpec
     Test.Specs.ExplainSpec
+    Test.Specs.FunctionsSpec
     Test.Specs.HealthSpec
     Test.Specs.MetricsSpec
     Test.Specs.MutationSpec
@@ -175,7 +178,7 @@ test-suite tests-dc-api
     Test.Specs.QuerySpec.FilteringSpec
     Test.Specs.QuerySpec.ForeachSpec
     Test.Specs.QuerySpec.OrderBySpec
+    Test.Specs.QuerySpec.RedactionSpec
     Test.Specs.QuerySpec.RelationshipsSpec
     Test.Specs.SchemaSpec
-    Test.Specs.UDFSpec
     Test.TestHelpers

@@ -2,7 +2,7 @@ import { StoryObj, Meta } from '@storybook/react';
 
 import { ListNativeQueries } from './ListNativeQueries';
 import { buildMetadata } from '../../mocks/metadata';
-import { extractModelsAndQueriesFromMetadata } from '../../utils';
+import { extractModelsAndQueriesFromMetadata } from '../../../../hasura-metadata-api/selectors';
 
 export default {
   component: ListNativeQueries,
@@ -23,10 +23,5 @@ const data = extractModelsAndQueriesFromMetadata(
 export const Basic: StoryObj<typeof ListNativeQueries> = {
   render: args => {
     return <ListNativeQueries {...args} nativeQueries={data.queries} />;
-  },
-};
-export const Loading: StoryObj<typeof ListNativeQueries> = {
-  render: args => {
-    return <ListNativeQueries {...args} isLoading />;
   },
 };

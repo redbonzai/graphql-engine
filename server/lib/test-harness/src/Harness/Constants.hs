@@ -88,7 +88,7 @@ postgresMetadataPort = 65002
 
 postgresqlMetadataConnectionString :: String
 postgresqlMetadataConnectionString =
-  "postgres://"
+  "postgresql://"
     <> postgresMetadataUser
     <> ":"
     <> postgresMetadataPassword
@@ -142,7 +142,7 @@ citusPort = 65004
 
 citusConnectionString :: UniqueTestId -> Text
 citusConnectionString uniqueTestId =
-  "postgres://"
+  "postgresql://"
     <> citusUser
     <> ":"
     <> citusPassword
@@ -155,7 +155,7 @@ citusConnectionString uniqueTestId =
 
 defaultCitusConnectionString :: Text
 defaultCitusConnectionString =
-  "postgres://"
+  "postgresql://"
     <> citusUser
     <> ":"
     <> citusPassword
@@ -280,6 +280,8 @@ serveOptions =
       soEnableTelemetry = Init.TelemetryDisabled,
       soStringifyNum = Options.Don'tStringifyNumbers,
       soDangerousBooleanCollapse = Options.Don'tDangerouslyCollapseBooleans,
+      soBackwardsCompatibleNullInNonNullableVariables = Options.Don'tAllowNullInNonNullableVariables,
+      soRemoteNullForwardingPolicy = Options.RemoteForwardAccurately,
       soEnabledAPIs = testSuiteEnabledApis,
       soLiveQueryOpts = ES.mkSubscriptionsOptions Nothing Nothing,
       soStreamingQueryOpts = ES.mkSubscriptionsOptions Nothing Nothing,
@@ -308,7 +310,13 @@ serveOptions =
       soDefaultNamingConvention = Init._default Init.defaultNamingConventionOption,
       soExtensionsSchema = ExtensionsSchema "public",
       soMetadataDefaults = emptyMetadataDefaults,
-      soApolloFederationStatus = ApolloFederationDisabled
+      soApolloFederationStatus = ApolloFederationDisabled,
+      soCloseWebsocketsOnMetadataChangeStatus = Init._default Init.closeWebsocketsOnMetadataChangeOption,
+      soMaxTotalHeaderLength = Init._default Init.maxTotalHeaderLengthOption,
+      soTriggersErrorLogLevelStatus = Init._default Init.triggersErrorLogLevelStatusOption,
+      soAsyncActionsFetchBatchSize = Init._default Init.asyncActionsFetchBatchSizeOption,
+      soPersistedQueries = Init._default Init.persistedQueriesOption,
+      soPersistedQueriesTtl = Init._default Init.persistedQueriesTtlOption
     }
 
 -- | What log level should be used by the engine; this is not exported, and

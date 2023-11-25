@@ -43,7 +43,7 @@ instance NFData UT.Variable
 
 instance NFData UT.TemplateItem
 
-instance NFData UT.URLTemplate
+instance NFData UT.Template
 
 instance NFData C.StepField
 
@@ -114,10 +114,6 @@ instance J.FromJSON C.CronSchedule where
 
 instance J.ToJSON C.CronSchedule where
   toJSON = J.String . C.serializeCronSchedule
-
-instance J.FromJSONKey Void
-
-instance J.ToJSONKey Void
 
 instance J.FromJSON ByteString where
   parseJSON = J.withText "ByteString" (pure . encodeUtf8)

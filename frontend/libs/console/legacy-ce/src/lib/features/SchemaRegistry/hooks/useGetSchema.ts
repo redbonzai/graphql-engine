@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useQuery } from 'react-query';
 import { schemaRegsitryControlPlaneClient } from '../utils';
-import { FETCH_REGSITRY_SCHEMA_QUERY } from '../queries';
+import { FETCH_REGISTRY_SCHEMA_QUERY } from '../queries';
 import { GetRegistrySchemaResponseWithError } from '../types';
 import {
   FETCH_REGISTRY_SCHEMA_QUERY_NAME,
@@ -26,19 +26,21 @@ export const useGetSchema = (schemaId: string): FetchSchemaResponse => {
     return schemaRegsitryControlPlaneClient.query<
       GetRegistrySchemaResponseWithError,
       { schemaId: string }
-    >(FETCH_REGSITRY_SCHEMA_QUERY, {
+    >(FETCH_REGISTRY_SCHEMA_QUERY, {
       schemaId: schemaId,
     });
   };
 
-  const { data, error, isLoading } = useQuery({
+  const { data, error, isLoading, refetch } = useQuery({
     queryKey: FETCH_REGISTRY_SCHEMA_QUERY_NAME,
     queryFn: () => fetchRegistrySchemaQueryFn(schemaId),
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: SCHEMA_REGISTRY_REFRESH_TIME,
   });
-
+  React.useEffect(() => {
+    refetch();
+  }, [schemaId]);
   if (isLoading) {
     return {
       kind: 'loading',
@@ -51,7 +53,6 @@ export const useGetSchema = (schemaId: string): FetchSchemaResponse => {
       message: 'error',
     };
   }
-
   return {
     kind: 'success',
     response: data.data,

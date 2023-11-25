@@ -22,14 +22,14 @@ import Hasura.GraphQL.Schema.BoolExp.AggregationPredicates
   )
 import Hasura.GraphQL.Schema.Introspection (queryInputFieldsParserIntrospection)
 import Hasura.Prelude
-import Hasura.RQL.IR.BoolExp (GBoolExp (..), OpExpG (AEQ))
+import Hasura.RQL.IR.BoolExp
 import Hasura.RQL.IR.BoolExp.AggregationPredicates
 import Hasura.RQL.IR.Value (Provenance (FreshVar), UnpreparedValue (UVParameter))
 import Hasura.RQL.Types.BackendType (BackendSourceKind (PostgresVanillaKind), BackendType (Postgres), PostgresKind (Vanilla))
 import Hasura.RQL.Types.Column (ColumnType (ColumnScalar), ColumnValue (..))
 import Hasura.RQL.Types.Common (InsertOrder (..), RelName (..), RelType (..), SourceName (..))
 import Hasura.RQL.Types.NamingCase (NamingCase (..))
-import Hasura.RQL.Types.Relationships.Local (RelInfo (..), RelTarget (..))
+import Hasura.RQL.Types.Relationships.Local (RelInfo (..), RelMapping (..), RelTarget (..))
 import Hasura.RQL.Types.Schema.Options qualified as Options
 import Hasura.RQL.Types.Source (DBObjectsIntrospection (..), SourceInfo (..))
 import Hasura.RQL.Types.SourceCustomization (ResolvedSourceCustomization (..))
@@ -37,20 +37,13 @@ import Hasura.Table.Cache
   ( TableCoreInfoG (_tciName),
     TableInfo (_tiCoreInfo),
   )
-import Language.GraphQL.Draft.Syntax qualified as G
 import Language.GraphQL.Draft.Syntax.QQ qualified as G
 import Test.Aeson.Expectation (shouldBeSubsetOf)
 import Test.Hspec
 import Test.Hspec.Extended
 import Test.Parser.Field qualified as GQL
 import Test.Parser.Internal
-  ( ColumnInfoBuilder
-      ( ColumnInfoBuilder,
-        cibIsPrimaryKey,
-        cibName,
-        cibNullable,
-        cibType
-      ),
+  ( ColumnInfoBuilder (..),
     TableInfoBuilder (columns, relations),
     buildTableInfo,
     mkTable,
@@ -210,7 +203,7 @@ spec = do
                           aggPredArguments = AggregationPredicateArgumentsStar,
                           aggPredPredicate =
                             [ AEQ
-                                True
+                                NonNullableComparison
                                 ( UVParameter
                                     FreshVar
                                     ColumnValue
@@ -255,12 +248,14 @@ spec = do
             { columns =
                 [ ColumnInfoBuilder
                     { cibName = "id",
+                      cibPosition = 0,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = True
                     },
                   ColumnInfoBuilder
                     { cibName = "title",
+                      cibPosition = 1,
                       cibType = ColumnScalar PGText,
                       cibNullable = False,
                       cibIsPrimaryKey = False
@@ -277,24 +272,28 @@ spec = do
             { columns =
                 [ ColumnInfoBuilder
                     { cibName = "id",
+                      cibPosition = 0,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = True
                     },
                   ColumnInfoBuilder
                     { cibName = "title",
+                      cibPosition = 1,
                       cibType = ColumnScalar PGText,
                       cibNullable = False,
                       cibIsPrimaryKey = False
                     },
                   ColumnInfoBuilder
                     { cibName = "duration_seconds",
+                      cibPosition = 2,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = False
                     },
                   ColumnInfoBuilder
                     { cibName = "album_id",
+                      cibPosition = 3,
                       cibType = ColumnScalar PGInteger,
                       cibNullable = False,
                       cibIsPrimaryKey = False
@@ -308,7 +307,7 @@ spec = do
       RelInfo
         { riName = RelName [nonEmptyTextQQ|tracks|],
           riType = ArrRel,
-          riMapping = HashMap.fromList [("id", "album_id")],
+          riMapping = RelMapping $ HashMap.fromList [("id", "album_id")],
           riTarget = RelTargetTable (mkTable "track"),
           riIsManual = False,
           riInsertOrder = AfterParent

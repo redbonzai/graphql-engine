@@ -174,12 +174,13 @@ The JWT will normally also contain standard (`sub`, `iat` etc.) and custom (`nam
 ### type {#jwt-json-type}
 
 This specifies the cryptographic signing algorithm which is used to sign the JWTs. Valid values are : `HS256`, `HS384`,
-`HS512`, `RS256`, `RS384`, `RS512`, `Ed25519`. (see [https://jwt.io](https://jwt.io/)).
+`HS512`, `RS256`, `RS384`, `RS512`, `Ed25519`, `ES256`, `ES384`, `ES512`. (see [https://jwt.io](https://jwt.io/)).
 
 `HS*` is for HMAC-SHA based algorithms. `RS*` is for RSA based signing. `Ed*` is for Edwards-curve Digital Signature
-algorithms. For example, if your auth server is using HMAC-SHA256 for signing the JWTs, then use `HS256`. If it is using
-RSA with SHA-512, then use `RS512`. If it is using an EdDSA instance of Edwards25519, then use `Ed25519`. EC public keys
-are not yet supported.
+algorithms. `ES*` is for Elliptic-curve Digital Signature algorithms. For example, if your auth server is using
+HMAC-SHA256 for signing the JWTs, then use `HS256`. If it is using RSA with SHA-512, then use `RS512`. If it is using an
+EdDSA instance of Edwards25519, then use `Ed25519`. If it is using an ES instance of ECDSA with 256-bit curve, then use
+`ES256`.
 
 This is an optional field. This is required only if you are using the `key` property in the config.
 
@@ -187,8 +188,8 @@ This is an optional field. This is required only if you are using the `key` prop
 
 - In the case of a symmetric key (i.e. a HMAC-based key), just the key as is. (e.g. -"abcdef..."). The key must be long
   enough for the chosen algorithm, (e.g. for HS256 it must be at least 32 characters long).
-- In the case of an asymmetric key (RSA, EdDSA etc.), only the **public** key, in a PEM-encoded string or as an X509
-  certificate.
+- In the case of an asymmetric key (RSA, EdDSA, ECDSA etc.), only the **public** key, in a PEM-encoded string or as an
+  X509 certificate.
 
 This is an optional field. You can also provide a URL to fetch JWKs from using the `jwk_url` field.
 
@@ -541,6 +542,7 @@ The following are the possible values:
 
 - `{"type": "Authorization"}`
 - `{"type": "Cookie", "name": "cookie_name" }`
+- `{"type": "CustomHeader", "name": "header_name" }`
 
 Default is `{"type": "Authorization"}`.
 
@@ -548,6 +550,8 @@ In the default mode, Hasura expects an `Authorization` header with a `Bearer` to
 
 In the cookie mode, Hasura will try to parse the cookie header with the given cookie name. The value of the cookie
 should be the exact JWT.
+
+In the custom header mode, Hasura expects a `header_name` header with the exact JWT token value.
 
 Example:
 
@@ -561,6 +565,12 @@ If `header` is `{"type": "Cookie", "name": "cookie_name" }` then JWT header shou
 
 ```none
 Cookie: cookie_name=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWI...
+```
+
+If `header` is `{"type": "CustomHeader", "name": "header_name" }` then JWT header should look like:
+
+```none
+header_name: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWI...
 ```
 
 ## Run Hasura GraphQL Engine in JWT mode {#running-with-jwt}
@@ -668,8 +678,38 @@ the public key.
 ```json
 {
   "type":"Ed25519",
-  "key": "-----BEGIN CERTIFICATE REQUEST-----\nMIIBAzCBtgIBADAnMQswCQYDVQQGEwJERTEYMBYGA1UEAwwPd3d3LmV4YW1wbGUu\nY29tMCowBQYDK2VwAyEA/9DV/InajW02Q0tC/tyr9mCSbSnNP1txICXVJrTGKDSg\nXDBaBgkqhkiG9w0BCQ4xTTBLMAsGA1UdDwQEAwIEMDATBgNVHSUEDDAKBggrBgEF\nBQcDATAnBgNVHREEIDAegg93d3cuZXhhbXBsZS5jb22CC2V4YW1wbGUuY29tMAUG\nAytlcANBAKbTqnTyPcf4ZkVuq2tC108pBGY19VgyoI+PP2wD2KaRz4QAO7Bjd+7S\nljyJoN83UDdtdtgb7aFgb611gx9W4go=\n-----END CERTIFICATE REQUEST-----
-  "
+  "key": "-----BEGIN CERTIFICATE REQUEST-----\nMIIBAzCBtgIBADAnMQswCQYDVQQGEwJERTEYMBYGA1UEAwwPd3d3LmV4YW1wbGUu\nY29tMCowBQYDK2VwAyEA/9DV/InajW02Q0tC/tyr9mCSbSnNP1txICXVJrTGKDSg\nXDBaBgkqhkiG9w0BCQ4xTTBLMAsGA1UdDwQEAwIEMDATBgNVHSUEDDAKBggrBgEF\nBQcDATAnBgNVHREEIDAegg93d3cuZXhhbXBsZS5jb22CC2V4YW1wbGUuY29tMAUG\nAytlcANBAKbTqnTyPcf4ZkVuq2tC108pBGY19VgyoI+PP2wD2KaRz4QAO7Bjd+7S\nljyJoN83UDdtdtgb7aFgb611gx9W4go=\n-----END CERTIFICATE REQUEST-----"
+}
+```
+
+#### EC based
+
+If your auth server is using ECDSA to sign JWTs, and is using the ES variant with a 256-bit key, the JWT config only
+needs to have the public key.
+
+**Example 1**: public key in PEM format (not OpenSSH format):
+
+```json
+{
+  "type": "ES256",
+  "key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+uQbTjL3chynL4wXgUg2R9\nq9UU8I5mEovUf86QZ7kOBIjJwqnzD1omageEHWwHdBO6B+dFabmdT9POxg==\n-----END PUBLIC KEY-----"
+}
+```
+
+**Example 2**: public key as X509 certificate:
+
+```json
+{
+  "type": "ES256",
+  "key": "-----BEGIN CERTIFICATE-----\nMIIBbjCCARWgAwIBAgIUGn02F6Y6s88dDGmIfwiNxWxDjhswCgYIKoZIzj0EAwIw\nDTELMAkGA1UEBhMCSU4wHhcNMjMwNTI0MTAzNTI4WhcNMjgwNTIyMTAzNTI4WjAN\nMQswCQYDVQQGEwJJTjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABBFbP6OfrkG0\n4y93Icpy+MF4FINkfavVFPCOZhKL1H/OkGe5DgSIycKp8w9aJmoHhB1sB3QTugfn\nRWm5nU/TzsajUzBRMB0GA1UdDgQWBBSaqFjzps1qG+x2DPISjaXTWsTOdDAfBgNV\nHSMEGDAWgBSaqFjzps1qG+x2DPISjaXTWsTOdDAPBgNVHRMBAf8EBTADAQH/MAoG\nCCqGSM49BAMCA0cAMEQCIBDHHWa/uLAVdGFEk82auTmw995+MsRwv52VXLw2Z+ji\nAiAXzOWIcGN8p25uhUN/7v9gEcADGIS4yUiv8gsn/Jk2ow==\n-----END CERTIFICATE-----"
+}
+```
+
+**Example 3**: public key published as JWKs:
+
+```json
+{
+  "jwk_url": "https://www.gstatic.com/iap/verify/public_key-jwk"
 }
 ```
 
@@ -677,7 +717,7 @@ the public key.
 
 By providing a set of JWT secrets to GraphQL Engine on Cloud or Enterprise versions, you can set it up to authenticate
 using various JWT issuers. This configuration option allows for greater flexibility in authentication. Read more here:
-[Multiple JWT Secrets](/security/multiple-jwt-secrets.mdx).
+[Multiple JWT Secrets](/auth/authentication/multiple-jwt-secrets.mdx).
 
 ## Security considerations
 
@@ -796,7 +836,7 @@ to get started.
 
 - [Custom JWT server with Hasura Actions](/actions/codegen/python-flask.mdx): A simple Python / Flask API that
   implements `Signup` and `Login` methods as Actions returning JWTs
-- [Auth0 JWT example](https://github.com/hasura/graphql-engine/tree/master/community/sample-apps/todo-auth0-jwt): A todo
+- [Auth0 JWT example](https://github.com/hasura/sample-apps/tree/main/todo-auth0-jwt): A todo
   app that uses Hasura GraphQL Engine and Auth0 JWT
-- [Firebase JWT example](https://github.com/hasura/graphql-engine/tree/master/community/sample-apps/firebase-jwt):
+- [Firebase JWT example](https://github.com/hasura/sample-apps/tree/main/firebase-jwt):
   Barebones example to show how to have Firebase Auth integrated with Hasura JWT mode

@@ -9,7 +9,8 @@ import Control.Concurrent.Async.Lifted.Safe qualified as LA
 import Control.Concurrent.STM qualified as STM
 import Control.Exception.Lifted
 import Control.Monad.Trans.Control qualified as MC
-import Data.Aeson (object, toJSON, (.=))
+import Data.Aeson qualified as J
+import Data.Aeson.Encoding qualified as J
 import Data.ByteString.Char8 qualified as B (pack)
 import Data.Text (pack)
 import Hasura.App.State
@@ -18,6 +19,7 @@ import Hasura.CredentialCache
 import Hasura.GraphQL.Execute qualified as E
 import Hasura.GraphQL.Logging
 import Hasura.GraphQL.Transport.HTTP (MonadExecuteQuery)
+import Hasura.GraphQL.Transport.HTTP.Protocol (encodeGQExecError)
 import Hasura.GraphQL.Transport.Instances ()
 import Hasura.GraphQL.Transport.WebSocket
 import Hasura.GraphQL.Transport.WebSocket.Protocol
@@ -48,6 +50,7 @@ import System.Metrics.Gauge qualified as EKG.Gauge
 
 createWSServerApp ::
   ( MonadIO m,
+    MonadFail m, -- only due to https://gitlab.haskell.org/ghc/ghc/-/issues/15681
     MC.MonadBaseControl IO m,
     LA.Forall (LA.Pure m),
     UserAuthentication m,
@@ -151,19 +154,19 @@ mkWSActions logger subProtocol =
     mkPostExecErrMessageAction wsConn opId execErr =
       sendMsg wsConn $ case subProtocol of
         Apollo -> SMData $ DataMsg opId $ throwError execErr
-        GraphQLWS -> SMErr $ ErrorMsg opId $ toJSON execErr
+        GraphQLWS -> SMErr $ ErrorMsg opId $ encodeGQExecError execErr
 
     mkOnErrorMessageAction wsConn err mErrMsg =
       case subProtocol of
         Apollo ->
           case mErrMsg of
-            WS.ConnInitFailed -> sendCloseWithMsg logger wsConn (WS.mkWSServerErrorCode mErrMsg err) (Just $ SMConnErr err) Nothing
+            WS.ConnInitFailed -> sendCloseWithMsg logger wsConn (WS.mkWSServerErrorCode subProtocol mErrMsg err) (Just $ SMConnErr err) Nothing
             WS.ClientMessageParseFailed -> sendMsg wsConn $ SMConnErr err
-        GraphQLWS -> sendCloseWithMsg logger wsConn (WS.mkWSServerErrorCode mErrMsg err) (Just $ SMConnErr err) Nothing
+        GraphQLWS -> sendCloseWithMsg logger wsConn (WS.mkWSServerErrorCode subProtocol mErrMsg err) Nothing Nothing
 
     mkConnectionCloseAction wsConn opId errMsg =
       when (subProtocol == GraphQLWS)
-        $ sendCloseWithMsg logger wsConn (GenericError4400 errMsg) (Just . SMErr $ ErrorMsg opId $ toJSON (pack errMsg)) (Just 1000)
+        $ sendCloseWithMsg logger wsConn (GenericError4400 errMsg) (Just . SMErr $ ErrorMsg opId $ J.toEncoding (pack errMsg)) (Just 1000)
 
     getServerMsgType = case subProtocol of
       Apollo -> SMData
@@ -180,5 +183,5 @@ mkWSActions logger subProtocol =
         }
 
     fmtErrorMessage errMsgs = case subProtocol of
-      Apollo -> object ["errors" .= errMsgs]
-      GraphQLWS -> toJSON errMsgs
+      Apollo -> J.pairs (J.pair "errors" $ J.list id errMsgs)
+      GraphQLWS -> J.list id errMsgs

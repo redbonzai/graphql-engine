@@ -22,7 +22,7 @@ import Hasura.GraphQL.Schema.Backend
 import Hasura.GraphQL.Schema.Common (Scenario (Frontend))
 import Hasura.GraphQL.Schema.Parser (FieldParser)
 import Hasura.Prelude
-import Hasura.RQL.IR.BoolExp (AnnBoolExpFld (..), GBoolExp (..), PartialSQLExp (..))
+import Hasura.RQL.IR.BoolExp (AnnBoolExpFld (..), AnnRedactionExp (..), GBoolExp (..), PartialSQLExp (..))
 import Hasura.RQL.IR.Root (RemoteRelationshipField)
 import Hasura.RQL.IR.Update (AnnotatedUpdateG (..))
 import Hasura.RQL.IR.Value (UnpreparedValue (..))
@@ -55,6 +55,8 @@ mkTable name =
 data ColumnInfoBuilder = ColumnInfoBuilder
   { -- | name of the column
     cibName :: Text,
+    -- | column position
+    cibPosition :: Int,
     -- | Column type, e.g.
     --
     -- > ColumnScalar PGText
@@ -73,7 +75,7 @@ mkColumnInfo ColumnInfoBuilder {..} =
   ColumnInfo
     { ciColumn = unsafePGCol cibName,
       ciName = unsafeMkName cibName,
-      ciPosition = 0,
+      ciPosition = cibPosition,
       ciType = cibType,
       ciIsNullable = cibNullable,
       ciDescription = Nothing,
@@ -145,7 +147,8 @@ buildTableInfo TableInfoBuilder {..} = tableInfo
           _tciEnumValues = Nothing,
           _tciCustomConfig = tableConfig,
           _tciExtraTableMetadata = PGExtraTableMetadata Table,
-          _tciApolloFederationConfig = Nothing
+          _tciApolloFederationConfig = Nothing,
+          _tciRawColumns = []
         }
 
     pk :: Maybe (PrimaryKey PG (ColumnInfo PG))
@@ -201,7 +204,7 @@ buildTableInfo TableInfoBuilder {..} = tableInfo
     selPermInfo :: SelPermInfo PG
     selPermInfo =
       SelPermInfo
-        { spiCols = HashMap.fromList . fmap ((,Nothing) . unsafePGCol . cibName) $ columns,
+        { spiCols = HashMap.fromList . fmap ((,NoRedaction) . unsafePGCol . cibName) $ columns,
           spiComputedFields = mempty,
           spiFilter = upiFilter,
           spiLimit = Nothing,
@@ -243,7 +246,8 @@ buildTableInfo TableInfoBuilder {..} = tableInfo
           upiCheck = Nothing,
           upiSet = mempty,
           upiBackendOnly = False,
-          upiRequiredHeaders = mempty
+          upiRequiredHeaders = mempty,
+          upiValidateInput = Nothing
         }
 
     columnInfos :: [ColumnInfo PG]
@@ -255,4 +259,4 @@ buildTableInfo TableInfoBuilder {..} = tableInfo
       (x : xs) -> Just $ foldl (<>) (NESeq.singleton x) $ fmap NESeq.singleton xs
 
     upiFilter :: GBoolExp PG (AnnBoolExpFld PG (PartialSQLExp PG))
-    upiFilter = BoolAnd $ fmap (\ci -> BoolField $ AVColumn ci []) columnInfos
+    upiFilter = BoolAnd $ fmap (\ci -> BoolField $ AVColumn ci NoRedaction []) columnInfos

@@ -5,6 +5,7 @@
 module Harness.TestEnvironment
   ( TestEnvironment (..),
     GlobalTestEnvironment (..),
+    GlobalFlags (..),
     Protocol (..),
     Server (..),
     TestingMode (..),
@@ -17,6 +18,7 @@ module Harness.TestEnvironment
     focusFixtureLeft,
     focusFixtureRight,
     scalarTypeToText,
+    graphQLTypeToText,
     serverUrl,
     stopServer,
     testLogTrace,
@@ -25,15 +27,21 @@ module Harness.TestEnvironment
     testLogHarness,
     getSchemaName,
     getSchemaNameInternal,
+    defaultGlobalFlags,
+    traceIf,
   )
 where
 
 import Control.Concurrent.Async qualified as Async
-import Data.Aeson (Value)
+import Data.Aeson (ToJSON, Value)
+import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.Has
 import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Debug.Trace
 import Harness.Constants qualified as Constants
 import Harness.GlobalTestEnvironment
+import Harness.Http qualified as Http
 import Harness.Logging.Messages
 import Harness.Permissions.Types (Permission)
 import Harness.Schema.Name
@@ -62,7 +70,8 @@ data TestEnvironment = TestEnvironment
     -- | Custom fixture-specific options.
     _options :: Custom.Options,
     -- Compatibility with the new, componentised fixtures:
-    _postgraphqlInternal :: TestEnvironment -> Value -> IO Value,
+    _postgraphqlInternal :: TestEnvironment -> Http.RequestHeaders -> Value -> IO Value,
+    _postMetadataInternal :: TestEnvironment -> Int -> Http.RequestHeaders -> Value -> IO Value,
     _shouldReturnYamlFInternal :: TestEnvironment -> (Value -> IO Value) -> IO Value -> Value -> IO (),
     _getSchemaNameInternal :: TestEnvironment -> SchemaName
   }
@@ -71,6 +80,11 @@ scalarTypeToText :: TestEnvironment -> ScalarType -> Text
 scalarTypeToText TestEnvironment {fixtureName} = case fixtureName of
   Backend BackendTypeConfig {backendScalarType} -> backendScalarType
   _ -> error "scalarTypeToText only currently defined for the `Backend` `FixtureName`"
+
+graphQLTypeToText :: TestEnvironment -> ScalarType -> Text
+graphQLTypeToText TestEnvironment {fixtureName} = case fixtureName of
+  Backend BackendTypeConfig {backendGraphQLType} -> backendGraphQLType
+  _ -> error "graphQLTypeToText only currently defined for the `Backend` `FixtureName`"
 
 -- | The role we're going to use for testing. Either we're an admin, in which
 -- case all permissions are implied, /or/ we're a regular user, in which case
@@ -206,6 +220,21 @@ instance Has Services.PostGraphql TestEnvironment where
           const (Services.getPostGraphql $ f (getter testEnv))
       }
 
+-- | This enables late binding of 'postMetadata' on the test environment.
+-- This makes 'TestEnvironment'-based specs more readily compatible with componontised fixtures.
+--
+-- This instance is somewhat subtle, in that the 'PostMetadata' function we return
+-- has to constructed using the *current* test environment. Otherwise we'll break
+-- the late binding and 'postMetadataInternal' won't pick up updates to
+-- permissions or protocols.
+instance Has Services.PostMetadata TestEnvironment where
+  getter testEnv = Services.PostMetadata $ _postMetadataInternal testEnv testEnv
+  modifier f testEnv =
+    testEnv
+      { _postMetadataInternal =
+          const (Services.getPostMetadata $ f (getter testEnv))
+      }
+
 -- | This enables late binding of 'shouldReturnYaml' on the test environment.
 -- This makes 'TestEnvironment'-based specs more readily compatible with componontised fixtures.
 -- Same nuances hold for this as for 'PostGraphql'.
@@ -249,3 +278,11 @@ getSchemaNameInternal testEnv = getSchemaNameByTestIdAndBackendType (fmap backen
     getSchemaNameByTestIdAndBackendType (Just Cockroach) _ = SchemaName Constants.cockroachDb
     getSchemaNameByTestIdAndBackendType (Just (DataConnector "sqlite")) _ = SchemaName "main"
     getSchemaNameByTestIdAndBackendType (Just (DataConnector _)) _ = SchemaName $ T.pack Constants.dataConnectorDb
+
+-- | trace if flag is set in the test environment.
+traceIf :: (ToJSON a) => (Show a) => TestEnvironment -> a -> a
+traceIf testEnv value
+  | gfTraceCommands (globalFlags (globalEnvironment testEnv)) =
+      let pretty = TL.unpack (pShow (encodePretty value))
+       in trace (show (uniqueTestId testEnv) <> ":\n" <> pretty) value
+  | otherwise = value

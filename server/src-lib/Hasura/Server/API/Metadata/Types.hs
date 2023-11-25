@@ -15,7 +15,6 @@ import Hasura.RQL.DDL.ComputedField
 import Hasura.RQL.DDL.ConnectionTemplate
 import Hasura.RQL.DDL.DataConnector
 import Hasura.RQL.DDL.EventTrigger
-import Hasura.RQL.DDL.FeatureFlag
 import Hasura.RQL.DDL.Metadata
 import Hasura.RQL.DDL.Permission
 import Hasura.RQL.DDL.QueryTags
@@ -197,13 +196,14 @@ data RQLMetadataV1
   | RMGetCatalogState !GetCatalogState
   | RMSetCatalogState !SetCatalogState
   | RMTestWebhookTransform !(Unvalidated TestWebhookTransform)
-  | -- Feature Flags
-    RMGetFeatureFlag !GetFeatureFlag
   | -- Bulk metadata queries
     RMBulk [RQLMetadataRequest]
   | -- Bulk metadata queries, but don't stop if something fails - return all
     -- successes and failures as separate items
     RMBulkKeepGoing [RQLMetadataRequest]
+  | -- | Bulk metadata queries, running a single schema cache resolve at the
+    -- end. Only works for a subset of commands.
+    RMBulkAtomic [RQLMetadataRequest]
   deriving (Generic)
 
 data RQLMetadataV2

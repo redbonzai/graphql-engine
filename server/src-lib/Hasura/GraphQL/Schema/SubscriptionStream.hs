@@ -23,11 +23,12 @@ import Hasura.GraphQL.Schema.Parser
     Parser,
   )
 import Hasura.GraphQL.Schema.Parser qualified as P
-import Hasura.GraphQL.Schema.Select (tablePermissionsInfo, tableSelectionList, tableWhereArg)
+import Hasura.GraphQL.Schema.Select (tableSelectionList, tableWhereArg)
 import Hasura.GraphQL.Schema.Table (getTableGQLName, getTableIdentifierName, tableSelectColumns, tableSelectPermissions)
 import Hasura.GraphQL.Schema.Typename
 import Hasura.Name qualified as Name
 import Hasura.Prelude
+import Hasura.RQL.IR.BoolExp qualified as IR
 import Hasura.RQL.IR.Select qualified as IR
 import Hasura.RQL.IR.Value qualified as IR
 import Hasura.RQL.Types.Column
@@ -102,14 +103,14 @@ cursorOrderingArg = do
 streamColumnParserArg ::
   forall b n m r.
   (MonadBuildSchema b r m n) =>
-  ColumnInfo b ->
-  SchemaT r m (InputFieldsParser n (Maybe (ColumnInfo b, ColumnValue b)))
-streamColumnParserArg colInfo = do
+  (ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b) ->
+  SchemaT r m (InputFieldsParser n (Maybe (ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b, ColumnValue b)))
+streamColumnParserArg (colInfo, redactionExp) = do
   fieldParser <- typedParser colInfo
   let fieldName = ciName colInfo
       fieldDesc = ciDescription colInfo
   pure do
-    P.fieldOptional fieldName fieldDesc fieldParser <&> fmap (colInfo,)
+    P.fieldOptional fieldName fieldDesc fieldParser <&> fmap (colInfo,redactionExp,)
   where
     typedParser columnInfo = do
       fmap IR.openValueOrigin <$> columnParser (ciType columnInfo) (G.Nullability $ ciIsNullable columnInfo)
@@ -125,8 +126,8 @@ streamColumnValueParser ::
   forall b r m n.
   (MonadBuildSchema b r m n) =>
   GQLNameIdentifier ->
-  [ColumnInfo b] ->
-  SchemaT r m (Parser 'Input n [(ColumnInfo b, ColumnValue b)])
+  NE.NonEmpty (ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b) ->
+  SchemaT r m (Parser 'Input n [(ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b, ColumnValue b)])
 streamColumnValueParser tableGQLIdentifier colInfos = do
   sourceInfo :: SourceInfo b <- asks getter
   let sourceName = _siName sourceInfo
@@ -137,7 +138,7 @@ streamColumnValueParser tableGQLIdentifier colInfos = do
       description = G.Description $ "Initial value of the column from where the streaming should start"
   memoizeOn 'streamColumnValueParser (sourceName, tableGQLIdentifier) $ do
     columnVals <- sequenceA <$> traverse streamColumnParserArg colInfos
-    pure $ P.object objName (Just description) columnVals <&> catMaybes
+    pure $ P.object objName (Just description) columnVals <&> (catMaybes . NE.toList)
 
 -- | Argument to accept the initial value from where the streaming should start.
 -- > initial_value: table_stream_cursor_value_input!
@@ -145,11 +146,11 @@ streamColumnValueParserArg ::
   forall b r m n.
   (MonadBuildSchema b r m n) =>
   GQLNameIdentifier ->
-  [ColumnInfo b] ->
-  SchemaT r m (InputFieldsParser n [(ColumnInfo b, ColumnValue b)])
-streamColumnValueParserArg tableGQLIdentifier colInfos = do
+  NE.NonEmpty (ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b) ->
+  SchemaT r m (InputFieldsParser n [(ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b, ColumnValue b)])
+streamColumnValueParserArg tableGQLIdentifier nonEmptyColInfos = do
   tCase <- retrieve $ _rscNamingConvention . _siCustomization @b
-  columnValueParser <- streamColumnValueParser tableGQLIdentifier colInfos
+  columnValueParser <- streamColumnValueParser tableGQLIdentifier nonEmptyColInfos
   pure do
     P.field (applyFieldNameCaseCust tCase Name._initial_value) (Just $ G.Description "Stream column input with initial value") columnValueParser
 
@@ -161,15 +162,15 @@ tableStreamColumnArg ::
   forall b r m n.
   (MonadBuildSchema b r m n) =>
   GQLNameIdentifier ->
-  [ColumnInfo b] ->
-  SchemaT r m (InputFieldsParser n [IR.StreamCursorItem b])
+  NE.NonEmpty (ColumnInfo b, IR.AnnRedactionExpUnpreparedValue b) ->
+  SchemaT r m (InputFieldsParser n [IR.StreamCursorItem b (IR.UnpreparedValue b)])
 tableStreamColumnArg tableGQLIdentifier colInfos = do
   cursorOrderingParser <- cursorOrderingArg @b
   streamColumnParser <- streamColumnValueParserArg tableGQLIdentifier colInfos
   pure $ do
     orderingArg <- cursorOrderingParser
     columnArg <- streamColumnParser
-    pure $ (uncurry (IR.StreamCursorItem (fromMaybe COAscending orderingArg))) <$> columnArg
+    pure $ (\(columnInfo, redactionExp, columnValue) -> IR.StreamCursorItem (fromMaybe COAscending orderingArg) columnInfo redactionExp columnValue) <$> columnArg
 
 -- | Input object that contains the initial value of a column
 --   along with how it needs to be ordered.
@@ -181,21 +182,22 @@ tableStreamCursorExp ::
   forall m n r b.
   (MonadBuildSchema b r m n) =>
   TableInfo b ->
-  SchemaT r m (Parser 'Input n [(IR.StreamCursorItem b)])
-tableStreamCursorExp tableInfo = do
+  SchemaT r m (Maybe (Parser 'Input n [(IR.StreamCursorItem b (IR.UnpreparedValue b))]))
+tableStreamCursorExp tableInfo = runMaybeT do
   sourceInfo :: SourceInfo b <- asks getter
   let sourceName = _siName sourceInfo
       tableName = tableInfoName tableInfo
       customization = _siCustomization sourceInfo
       tCase = _rscNamingConvention customization
       mkTypename = runMkTypename $ _rscTypeNames customization
-  memoizeOn 'tableStreamCursorExp (sourceName, tableName) $ do
-    tableGQLName <- getTableGQLName tableInfo
-    tableGQLIdentifier <- getTableIdentifierName tableInfo
-    columnInfos <- mapMaybe (^? _SCIScalarColumn) <$> tableSelectColumns tableInfo
+  tableGQLName <- getTableGQLName tableInfo
+  tableGQLIdentifier <- getTableIdentifierName tableInfo
+  columnInfos <- mapMaybe (\(column, redactionExp) -> (,redactionExp) <$> column ^? _SCIScalarColumn) <$> tableSelectColumns tableInfo
+  columnInfosNE <- hoistMaybe $ NE.nonEmpty columnInfos
+  lift $ memoizeOn 'tableStreamCursorExp (sourceName, tableName) do
+    columnParsers <- tableStreamColumnArg tableGQLIdentifier columnInfosNE
     let objName = mkTypename $ applyTypeNameCaseIdentifier tCase $ mkStreamCursorInputTypeName tableGQLIdentifier
         description = G.Description $ "Streaming cursor of the table " <>> tableGQLName
-    columnParsers <- tableStreamColumnArg tableGQLIdentifier columnInfos
     pure $ P.object objName (Just description) columnParsers
 
 -- | Argument to accept the cursor input object.
@@ -204,9 +206,9 @@ tableStreamCursorArg ::
   forall b r m n.
   (MonadBuildSchema b r m n) =>
   TableInfo b ->
-  SchemaT r m (InputFieldsParser n [IR.StreamCursorItem b])
-tableStreamCursorArg tableInfo = do
-  cursorParser <- tableStreamCursorExp tableInfo
+  SchemaT r m (Maybe (InputFieldsParser n [IR.StreamCursorItem b (IR.UnpreparedValue b)]))
+tableStreamCursorArg tableInfo = runMaybeT do
+  cursorParser <- MaybeT $ tableStreamCursorExp tableInfo
   pure $ do
     cursorArgs <-
       P.field cursorName cursorDesc $ P.list $ P.nullable cursorParser
@@ -223,11 +225,11 @@ tableStreamArguments ::
     MonadBuildSchema b r m n
   ) =>
   TableInfo b ->
-  SchemaT r m (InputFieldsParser n (SelectStreamArgs b))
-tableStreamArguments tableInfo = do
+  SchemaT r m (Maybe (InputFieldsParser n (SelectStreamArgs b)))
+tableStreamArguments tableInfo = runMaybeT $ do
   tCase <- retrieve $ _rscNamingConvention . _siCustomization @b
-  whereParser <- tableWhereArg tableInfo
-  cursorParser <- tableStreamCursorArg tableInfo
+  whereParser <- lift $ tableWhereArg tableInfo
+  cursorParser <- MaybeT $ tableStreamCursorArg tableInfo
   pure $ do
     whereArg <- whereParser
     cursorArg <-
@@ -261,7 +263,7 @@ selectStreamTable tableInfo fieldName description = runMaybeT $ do
   selectPermissions <- hoistMaybe $ tableSelectPermissions roleName tableInfo
   xStreamSubscription <- hoistMaybe $ streamSubscriptionExtension @b
   stringifyNumbers <- retrieve Options.soStringifyNumbers
-  tableStreamArgsParser <- lift $ tableStreamArguments tableInfo
+  tableStreamArgsParser <- MaybeT $ tableStreamArguments tableInfo
   selectionSetParser <- MaybeT $ tableSelectionList tableInfo
   lift
     $ memoizeOn 'selectStreamTable (sourceName, tableName, fieldName)

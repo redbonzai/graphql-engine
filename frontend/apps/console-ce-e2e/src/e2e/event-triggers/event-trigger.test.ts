@@ -11,9 +11,48 @@ describe('Create event trigger with shortest possible path', () => {
     cy.visit('/data/default/schema/public', {
       timeout: 10000,
     });
+
     cy.get('[data-test=add-track-table-user_table]', {
       timeout: 10000,
     }).click();
+
+    // if there is a trigger from a previous test, delete it
+    cy.visit('/events/data/event_trigger_test/modify', {
+      timeout: 10000,
+      onBeforeLoad(win) {
+        cy.stub(win, 'prompt').returns('event_trigger_test');
+      },
+    });
+
+    // wait for loading to not be visible
+    cy.get('span:contains("Loading...")', { timeout: 10000 }).should(
+      'not.be.visible'
+    );
+
+    cy.get('body').then($body => {
+      cy.log(
+        '**--- Delete the ET',
+        $body.find('button[data-test=delete-trigger]')
+      );
+      if ($body.find('button[data-test=delete-trigger]').length > 0) {
+        cy.log('**--- Delete the ET 2');
+        cy.intercept('POST', 'http://localhost:8080/v1/metadata', req => {
+          if (JSON.stringify(req.body).includes('delete_event_trigger')) {
+            req.alias = 'deleteTrigger';
+          }
+          req.continue();
+        });
+
+        cy.intercept('POST', 'http://localhost:9693/apis/migrate', req => {
+          if (JSON.stringify(req.body).includes('delete_event_trigger')) {
+            req.alias = 'deleteTrigger';
+          }
+        });
+
+        cy.get('button[data-test=delete-trigger]').click();
+        cy.wait('@deleteTrigger');
+      }
+    });
   });
   after(() => {
     // delete the table
@@ -78,14 +117,14 @@ describe('Create event trigger with shortest possible path', () => {
     cy.log(
       '**--- Click on Edit trigger operation and modfiy the trigger operation'
     );
-    cy.findAllByRole('button', { name: 'Edit' }).eq(1).click();
+    cy.get('[data-test=edit-operations]').click();
     cy.get('[name=update]').click();
-    cy.get('[name=column-id]').click();
+    cy.get('[name=column-id]', { timeout: 1000 }).click();
     cy.findByRole('button', { name: 'Save' }).click();
 
     // modify the retry config
     cy.log('**--- Click on Edit retry config and modify the config');
-    cy.findAllByRole('button', { name: 'Edit' }).eq(1).click();
+    cy.get('[data-test=edit-retry-config]').click();
     cy.get('[name=num_retries]').clear().type('10');
     cy.get('[name=interval_sec]').clear().type('5');
     cy.get('[name=timeout_sec]').clear().type('70');
@@ -93,7 +132,7 @@ describe('Create event trigger with shortest possible path', () => {
 
     // add headers
     cy.log('**--- Click on Edit retry config and add header');
-    cy.findAllByRole('button', { name: 'Edit' }).eq(2).click();
+    cy.get('[data-test=edit-header]').click();
     cy.findByPlaceholderText('key').type('x-hasura-user-id');
     cy.findByPlaceholderText('value').type('1234');
     cy.findByRole('button', { name: 'Save' }).click();
@@ -254,6 +293,7 @@ describe('Create event trigger with logest possible path', () => {
     );
     cy.findAllByRole('button', { name: 'Edit' }).eq(1).click();
     cy.get('[name=update]').click();
+
     cy.get('[name=column-id]').click();
     cy.findByRole('button', { name: 'Save' }).click();
 

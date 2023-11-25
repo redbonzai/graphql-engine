@@ -93,9 +93,9 @@ instance FromJSON RQLMetadataV1 where
       "set_query_tags" -> RMSetQueryTagsConfig <$> args
       "set_opentelemetry_config" -> RMSetOpenTelemetryConfig <$> args
       "set_opentelemetry_status" -> RMSetOpenTelemetryStatus <$> args
-      "get_feature_flag" -> RMGetFeatureFlag <$> args
       "bulk" -> RMBulk <$> args
       "bulk_keep_going" -> RMBulkKeepGoing <$> args
+      "bulk_atomic" -> RMBulkAtomic <$> args
       -- Backend prefixed metadata actions:
       _ -> do
         -- 1) Parse the backend source kind and metadata command:
