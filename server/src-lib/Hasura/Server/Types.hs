@@ -31,6 +31,7 @@ module Hasura.Server.Types
     ExtPersistedQueryRequest (..),
     ExtQueryReqs (..),
     MonadGetPolicies (..),
+    RemoteSchemaResponsePriority (..),
   )
 where
 
@@ -328,8 +329,8 @@ instance ToJSON ExtQueryReqs where
 instance FromJSON ExtQueryReqs where
   parseJSON arr@Array {} = EqrGQLReq <$> (GH.GQLBatchedReqs <$> parseJSON arr)
   parseJSON json
-    -- The APQ requests, have a special key called as Extensions
-    | isJust (json Lens.^? key "extensions") = EqrAPQReq <$> parseJSON json
+    -- The APQ requests, have a special object in the key `Extentions` called as `persistedQuery`
+    | isJust (json Lens.^? key "extensions" . key "persistedQuery") = EqrAPQReq <$> parseJSON json
     | otherwise = EqrGQLReq <$> (GH.GQLSingleRequest <$> parseJSON json)
 
 class (Monad m) => MonadGetPolicies m where
@@ -360,3 +361,17 @@ instance (MonadGetPolicies m) => MonadGetPolicies (StateT w m) where
   runGetApiTimeLimit = lift runGetApiTimeLimit
   runGetPrometheusMetricsGranularity = lift runGetPrometheusMetricsGranularity
   runGetModelInfoLogStatus = lift $ runGetModelInfoLogStatus
+
+-- | The priority of the response to be sent to the client for remote schema fields if there is both errors as well as
+-- data in the remote response.
+-- Read more about how we decode the remote response at `decodeGraphQLResp` in `Hasura.GraphQL.Transport.HTTP`
+--
+-- If there is both errors and data in the remote response, then:
+--
+-- * If the priority is set to `RemoteSchemaResponseData`, then the data is sent to the client.
+-- * If the priority is set to `RemoteSchemaResponseErrors`, then the errors are sent to the client.
+data RemoteSchemaResponsePriority
+  = -- | Data from the remote schema is sent
+    RemoteSchemaResponseData
+  | -- | Errors from the remote schema is sent
+    RemoteSchemaResponseErrors
