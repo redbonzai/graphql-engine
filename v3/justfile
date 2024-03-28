@@ -1,5 +1,13 @@
 set positional-arguments
 
+CLIPPY_ARGS := "-A clippy::result_large_err -D clippy::complexity -A clippy::too_many_arguments -D clippy::style"
+CLIPPY_FIX_ARGS := "-A clippy::result_large_err -A clippy::too_many_arguments"
+
+# This produces "-p engine -p lang-graphql -p ...".
+# See https://github.com/rust-lang/cargo/issues/4463 for why we build each
+# package explicitly instead of `cargo build --workspace --all-targets`.
+PACKAGE_SELECTOR := `ls crates | sed 's/^/-p /' | xargs echo`
+
 default:
   just --list
 
@@ -22,26 +30,22 @@ docker_with_test_env +args:
 
 # build used by CI
 ci-build:
-  # see https://github.com/rust-lang/cargo/issues/4463 for why we build each
-  # package explictly instead of cargo build --workspace --all-targets
-  just docker_with_source_only cargo build -p lang-graphql \
-                          -p engine \
-                          -p open-dds \
-                          -p tracing-util \
-                          -p hasura-authn-core \
-                          -p hasura-authn-webhook \
-                          --release --all-targets
+  just docker_with_source_only \
+    cargo build {{ PACKAGE_SELECTOR }} --release --all-targets
+
+build-local:
+  cargo build {{ PACKAGE_SELECTOR }} --release --all-targets
 
 # linting run by CI
 ci-lint:
   just docker_with_source_only sh -c \
-    "cargo clippy --no-deps -- -A clippy::result_large_err -D clippy::complexity -A clippy::too_many_arguments -D clippy::style && cargo fmt --check"
+    "cargo clippy --no-deps -- {{ CLIPPY_ARGS }}"
 
 fix:
-  just docker_with_source_only sh -c "cargo clippy --no-deps --fix --allow-no-vcs -- -A clippy::result_large_err -A clippy::too_many_arguments; cargo fmt"
+  just docker_with_source_only sh -c "cargo clippy --no-deps --fix --allow-no-vcs -- {{ CLIPPY_FIX_ARGS }}; cargo fmt"
 
 fix-local:
-  cargo clippy --no-deps --fix --allow-no-vcs -- -A clippy::result_large_err -A clippy::too_many_arguments; cargo fmt
+  cargo clippy --no-deps --fix --allow-no-vcs -- {{ CLIPPY_FIX_ARGS }}; cargo fmt
 
 # tests run by CI
 ci-test:
@@ -82,3 +86,62 @@ generate-benchmarks gh-issue gh-token:
 dev:
   docker compose run --build --rm dev_setup bash
   docker compose down
+
+# start all the docker deps for running tests (not engine, auth_hook, jaeger)
+start-docker-test-deps:
+  # start connectors and wait for health
+  docker compose -f ci.docker-compose.yaml \
+    up --wait postgres custom_connector
+  # start auth_hook
+  docker compose up --wait auth_hook
+  # start everything else (don't wait for postgres connector, it doesn't seem
+  # to work)
+  docker compose -f ci.docker-compose.yaml \
+    up -d
+
+# start all the docker run time deps for the engine
+start-docker-run-deps:
+  # start auth_hook and jaeger
+  docker compose up --wait auth_hook jaeger
+
+# stop all the docker deps
+stop-docker:
+  docker compose -f ci.docker-compose.yaml down -v
+  docker compose down -v
+
+# local development commands
+
+# these work by running tests locally rather than in Docker
+# to make them work, add the following lines to your `/etc/hosts` file
+# (without the '#' at the start):
+# 127.0.0.1 postgres_connector
+# 127.0.0.1 custom_connector
+
+# run the tests using local engine (once)
+test-local: start-docker-test-deps
+  cargo test
+
+# run a watch process that runs the tests locally
+watch-local: start-docker-test-deps
+  cargo watch \
+   -x test \
+   -x 'clippy --no-deps -- {{ CLIPPY_ARGS }}'
+
+# check the code is fine
+lint-local:
+  cargo clippy --no-deps -- {{ CLIPPY_ARGS }}
+
+# ensure we don't have unused dependencies:
+machete:
+  cargo machete --with-metadata
+
+# update golden tests
+update-golden-files-local: start-docker-test-deps
+  REGENERATE_GOLDENFILES=1 cargo test
+
+# run the engine using schema from tests
+run-local: start-docker-test-deps start-docker-run-deps
+  RUST_LOG=DEBUG cargo run --bin engine -- \
+  --otlp-endpoint http://localhost:4317 \
+  --authn-config-path auth_config.json \
+  --metadata-path crates/engine/tests/schema.json

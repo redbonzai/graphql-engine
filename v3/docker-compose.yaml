@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   postgres:
     image: postgis/postgis:16-3.4
@@ -16,7 +15,7 @@ services:
         source: postgres
         target: /var/lib/postgresql/data
       - type: bind
-        source: ./engine/tests/db_definition.sql
+        source: ./crates/engine/tests/db_definition.sql
         target: /docker-entrypoint-initdb.d/db_definition.sql
         read_only: true
     healthcheck:
@@ -27,16 +26,19 @@ services:
       interval: 5s
       timeout: 10s
       retries: 20
+
   reference_agent:
-    build: https://github.com/hasura/ndc-spec.git#v0.1.0-rc.11
+    build: https://github.com/hasura/ndc-spec.git#v0.1.0-rc.18
     ports:
       - 8102:8100
+
   auth_hook:
+    build: ./crates/hasura-authn-webhook/dev-auth-webhook
     ports:
       - "3050:3050"
-    build: ./hasura-authn-webhook/dev-auth-webhook
+
   jaeger:
-    image: jaegertracing/all-in-one:1.37
+    image: jaegertracing/all-in-one:1.55
     restart: always
     ports:
       - 5775:5775/udp
@@ -51,68 +53,85 @@ services:
       - 4318:4318 # OTLP HTTP
       - 9411:9411
     environment:
-      COLLECTOR_OTLP_ENABLED: 'true'
-      COLLECTOR_ZIPKIN_HOST_PORT: '9411'
+      COLLECTOR_OTLP_ENABLED: "true"
+      COLLECTOR_ZIPKIN_HOST_PORT: "9411"
+
   postgres_connector:
-    image: ghcr.io/hasura/ndc-postgres:dev-main-5aec135c1
+    image: ghcr.io/hasura/ndc-postgres:dev-main-0452625e7
+    command:
+      - serve
+      - --configuration
+      - /config.json
+      - "--otlp-endpoint"
+      - http://jaeger:4317
     ports:
       - 8100:8100
     volumes:
-      - ./engine/tests/pg_ndc_config.json:/config.json
+      - ./crates/engine/tests/pg_ndc_config.json:/config.json
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["serve", "--configuration", "/config.json", "--otlp-endpoint", "http://jaeger:4317"]
+
   custom_connector:
     build:
       context: .
-      target: builder
+      target: built
+    entrypoint:
+      - ./target/release/custom-connector
     ports:
       - 8101:8101
     healthcheck:
-      test: curl --fail http://localhost:8101/schema || exit 1
+      test: curl -fsS http://localhost:8101/schema
       start_period: 5s
       interval: 5s
       timeout: 10s
       retries: 20
-    command: ["sh", "-c", "cargo run --bin agent"]
+
   engine:
     build:
       context: .
-      target: builder
-      ssh:
-        - default
-    depends_on:
-      - reference_agent
-      - jaeger
-      - auth_hook
-
-    command: ["sh", "-c", "cargo run --bin engine -- --metadata-path $METADATA_PATH --otlp-endpoint http://jaeger:4317 --authn-config-path $AUTHN_CONFIG_PATH"]
+      target: built
+    entrypoint:
+      - ./target/release/engine
+    environment:
+      - METADATA_PATH
+      - AUTHN_CONFIG_PATH
+      - OLTP_ENDPOINT=http://jaeger:4317
     ports:
       # Binding to localhost:3001 avoids conflict with dev_setup
       - 3001:3000
+    depends_on:
+      reference_agent:
+        condition: service_started
+      jaeger:
+        condition: service_started
+      auth_hook:
+        condition: service_started
 
   dev_setup:
     build:
       context: .
       target: builder
-      ssh:
-        - default
-    depends_on:
-      - jaeger
-      - auth_hook
-      - postgres
-      - postgres_connector
-      - custom_connector
     volumes:
-      - ./tracing-util:/app/tracing-util
-      - ./lang-graphql:/app/lang-graphql
-      - ./open-dds:/app/open-dds
-      - ./engine:/app/engine
-      - ./hasura-authn-core:/app/hasura-authn-core
-      - ./hasura-authn-webhook:/app/hasura-authn-webhook
+      - ./crates/tracing-util:/app/tracing-util
+      - ./crates/lang-graphql:/app/lang-graphql
+      - ./crates/open-dds:/app/open-dds
+      - ./crates/engine:/app/engine
+      - ./crates/hasura-authn-core:/app/hasura-authn-core
+      - ./crates/hasura-authn-webhook:/app/hasura-authn-webhook
     ports:
       - 3000:3000
+    depends_on:
+      jaeger:
+        condition: service_started
+      auth_hook:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      postgres_connector:
+        condition: service_started
+      custom_connector:
+        condition: service_healthy
 
 volumes:
   postgres:

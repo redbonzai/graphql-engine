@@ -1,14 +1,12 @@
 [workspace]
 resolver = "2"
+
+package.version = "0.1.0"
+package.edition = "2021"
+package.license = "Apache-2.0"
+
 members = [
-  "tracing-util",
-  "lang-graphql",
-  "open-dds",
-  "engine",
-  "hasura-authn-core",
-  "hasura-authn-webhook",
-  "hasura-authn-jwt",
-  "custom-connector"
+  "crates/*"
 ]
 
 [profile.release]
