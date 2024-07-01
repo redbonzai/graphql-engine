@@ -5,27 +5,39 @@ use crate::validation::error::*;
 
 use super::source::*;
 
-fn normalize_scalar_value<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's, S>>(
+fn normalize_scalar_value<
+    'q,
+    's,
+    S: schema::SchemaContext,
+    V: ValueSource<'q, 's, S>,
+    NSGet: schema::NamespacedGetter<S>,
+>(
     schema: &'s schema::Schema<S>,
-    namespace: &S::Namespace,
+    namespaced_getter: &NSGet,
     context: &V::Context,
     location_type: &LocationType<'q, 's>,
     value: &V,
     scalar: &'s schema::Scalar,
 ) -> Result<normalized::Value<'s, S>> {
     match scalar.name.as_str() {
-        "Int" => value.get_integer(schema, namespace, context, location_type),
-        "ID" => value.get_id(schema, namespace, context, location_type),
-        "Float" => value.get_float(schema, namespace, context, location_type),
-        "Boolean" => value.get_boolean(schema, namespace, context, location_type),
-        "String" => value.get_string(schema, namespace, context, location_type),
-        _ => value.as_json_normalized(schema, namespace, context, location_type),
+        "Int" => value.get_integer(schema, namespaced_getter, context, location_type),
+        "ID" => value.get_id(schema, namespaced_getter, context, location_type),
+        "Float" => value.get_float(schema, namespaced_getter, context, location_type),
+        "Boolean" => value.get_boolean(schema, namespaced_getter, context, location_type),
+        "String" => value.get_string(schema, namespaced_getter, context, location_type),
+        _ => value.as_json_normalized(schema, namespaced_getter, context, location_type),
     }
 }
 
-pub fn normalize<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's, S>>(
+pub fn normalize<
+    'q,
+    's,
+    S: schema::SchemaContext,
+    V: ValueSource<'q, 's, S>,
+    NSGet: schema::NamespacedGetter<S>,
+>(
     schema: &'s schema::Schema<S>,
-    namespace: &S::Namespace,
+    namespaced_getter: &NSGet,
     context: &V::Context,
     value: &V,
     location_type: &LocationType<'q, 's>,
@@ -35,55 +47,78 @@ where
     's: 'q,
 {
     let normalized_value = match &location_type.type_().base {
-        ast::BaseType::Named(_) => match type_info {
-            schema::InputType::Scalar(scalar) => {
-                normalize_scalar_value(schema, namespace, context, location_type, value, scalar)
-            }
-            schema::InputType::Enum(enum_info) => {
-                normalize_enum_value(schema, namespace, context, location_type, value, enum_info)
-            }
-            schema::InputType::InputObject(input_object) => {
-                let normalized_object = normalize_input_object(
+        ast::BaseType::Named(_) => {
+            // If the value is `null` and the field is nullable return `null`
+            if value.is_null() && location_type.type_().nullable {
+                return Ok(normalized::Value::SimpleValue(
+                    normalized::SimpleValue::Null,
+                ));
+            };
+            match type_info {
+                schema::InputType::Scalar(scalar) => normalize_scalar_value(
                     schema,
-                    namespace,
+                    namespaced_getter,
                     context,
                     location_type,
                     value,
-                    input_object,
-                )?;
-                // Ok(normalized::Value::Object(normalized_object))
-                Ok(normalized_object)
+                    scalar,
+                ),
+                schema::InputType::Enum(enum_info) => normalize_enum_value(
+                    schema,
+                    namespaced_getter,
+                    context,
+                    location_type,
+                    value,
+                    enum_info,
+                ),
+                schema::InputType::InputObject(input_object) => {
+                    let normalized_object = normalize_input_object(
+                        schema,
+                        namespaced_getter,
+                        context,
+                        location_type,
+                        value,
+                        input_object,
+                    )?;
+                    Ok(normalized_object)
+                }
             }
-        },
+        }
         ast::BaseType::List(wrapped_type) => {
             if value.is_null() {
                 Ok(normalized::Value::SimpleValue(
                     normalized::SimpleValue::Null,
                 ))
             } else if value.is_list() {
-                value.fold_list(schema, namespace, context, location_type, |mut l, v| {
-                    // when normalizing list values, we don't want to coerce values as lists
-                    // i.e, `[1,2]` isn't a valid value for `[[Int]]` but `1` is a valid value for `[Int]`
-                    if wrapped_type.is_list() && !v.is_list() {
-                        // raise an error
-                        Err(Error::IncorrectFormat {
-                            expected_type: "LIST",
-                            actual_type: value.kind(),
-                        })
-                    } else {
-                        l.push(normalize(
-                            schema,
-                            namespace,
-                            context,
-                            v,
-                            &LocationType::List {
-                                type_: wrapped_type,
-                            },
-                            type_info,
-                        )?);
-                        Ok(l)
-                    }
-                })
+                value.fold_list(
+                    schema,
+                    namespaced_getter,
+                    context,
+                    location_type,
+                    |mut l, v| {
+                        // when normalizing list values, we don't want to coerce values as lists
+                        // i.e, `[1,2]` isn't a valid value for `[[Int]]` but `1` is a valid value for `[Int]`
+                        if wrapped_type.is_list() && !v.is_list() {
+                            // raise an error
+                            Err(Error::IncorrectFormat {
+                                expected_type: "LIST",
+                                actual_type: value.kind(),
+                            })
+                        } else {
+                            l.push(normalize(
+                                schema,
+                                namespaced_getter,
+                                context,
+                                v,
+                                &LocationType::List {
+                                    type_: wrapped_type,
+                                },
+                                type_info,
+                            )?);
+                            Ok(l)
+                        }
+                    },
+                )
             } else {
                 // get the dimension of the list type
                 // [Int] -> 1, [[Int]] -> 2, [[[Int]]] -> 3
@@ -92,7 +127,7 @@ where
                 let expected_base_type = location_type.type_().underlying_type_container();
                 let normalized_value = normalize(
                     schema,
-                    namespace,
+                    namespaced_getter,
                     context,
                     value,
                     &LocationType::NoLocation {
@@ -128,9 +163,15 @@ fn create_nested_vec<S: schema::SchemaContext>(
     current
 }
 
-fn normalize_enum_value<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's, S>>(
+fn normalize_enum_value<
+    'q,
+    's,
+    S: schema::SchemaContext,
+    V: ValueSource<'q, 's, S>,
+    NSGet: schema::NamespacedGetter<S>,
+>(
     schema: &'s schema::Schema<S>,
-    namespace: &S::Namespace,
+    namespaced_getter: &NSGet,
     context: &V::Context,
     location_type: &LocationType<'q, 's>,
     value: &V,
@@ -138,20 +179,18 @@ fn normalize_enum_value<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's,
 ) -> Result<normalized::Value<'s, S>> {
     value.fold_enum(
         schema,
-        namespace,
+        namespaced_getter,
         context,
         location_type,
         |raw_enum_value| {
-            let (enum_info, namespaced) = enum_info
-                .values
-                .get(raw_enum_value)
+            let (enum_info, namespaced) = namespaced_getter
+                .get(enum_info.values.get(raw_enum_value).ok_or_else(|| {
+                    Error::EnumValueNotFound {
+                        type_name: enum_info.name.clone(),
+                        enum_value: raw_enum_value.clone(),
+                    }
+                })?)
                 .ok_or_else(|| Error::EnumValueNotFound {
-                    type_name: enum_info.name.clone(),
-                    enum_value: raw_enum_value.clone(),
-                })?
-                .get(namespace)
-                .ok_or_else(|| Error::EnumValueNotAccessible {
-                    namespace: namespace.to_string(),
                     type_name: enum_info.name.clone(),
                     enum_value: raw_enum_value.clone(),
                 })?;
@@ -169,9 +208,15 @@ fn normalize_enum_value<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's,
     )
 }
 
-fn normalize_input_object<'q, 's, S: schema::SchemaContext, V: ValueSource<'q, 's, S>>(
+fn normalize_input_object<
+    'q,
+    's,
+    S: schema::SchemaContext,
+    V: ValueSource<'q, 's, S>,
+    NSGet: schema::NamespacedGetter<S>,
+>(
     schema: &'s schema::Schema<S>,
-    namespace: &S::Namespace,
+    namespaced_getter: &NSGet,
     context: &V::Context,
     location_type: &LocationType<'q, 's>,
     value: &V,
@@ -181,89 +226,87 @@ where
     's: 'q,
 {
     // let (normalized_object, required_field_count) = value.fold_key_values(
-    let normalized_object = value.fold_key_values(
-        schema,
-        namespace,
-        context,
-        location_type,
-        // (IndexMap::new(), 0),
-        |mut normalized_object, field, field_value| {
-            // |(mut normalized_object, mut required_field_count), field, field_value| {
-            let (field_info, namespaced) = input_object
-                .fields
-                .get(field)
-                .ok_or_else(|| Error::InputFieldNotFound {
-                    type_name: input_object.name.clone(),
-                    field_name: field.clone(),
-                })?
-                .get(namespace)
-                .ok_or_else(|| Error::InputFieldNotAccessible {
-                    namespace: namespace.to_string(),
-                    type_name: input_object.name.clone(),
-                    field_name: field.clone(),
-                })?;
+    let normalized_object =
+        value.fold_key_values(
+            schema,
+            namespaced_getter,
+            context,
+            location_type,
+            // (IndexMap::new(), 0),
+            |mut normalized_object, field, field_value| {
+                // |(mut normalized_object, mut required_field_count), field, field_value| {
+                let (field_info, namespaced) = namespaced_getter
+                    .get(input_object.fields.get(field).ok_or_else(|| {
+                        Error::InputFieldNotFound {
+                            type_name: input_object.name.clone(),
+                            field_name: field.clone(),
+                        }
+                    })?)
+                    .ok_or_else(|| Error::InputFieldNotFound {
+                        type_name: input_object.name.clone(),
+                        field_name: field.clone(),
+                    })?;
 
-            // Get the type of the field, we need this to normalize the field value
-            let field_type = &field_info.field_type;
-            let field_type_info = {
-                let field_type_info =
-                    schema
+                // Get the type of the field, we need this to normalize the field value
+                let field_type = &field_info.field_type;
+                let field_type_info = {
+                    let field_type_info = schema
                         .types
                         .get(field_type.underlying_type())
                         .ok_or_else(|| Error::InternalTypeNotFound {
                             type_name: field_type.underlying_type().clone(),
                         })?;
-                field_type_info
-                    .as_input_type()
-                    .ok_or_else(|| Error::InternalNotInputType {
+                    field_type_info
+                        .as_input_type()
+                        .ok_or_else(|| Error::InternalNotInputType {
+                            type_name: field_type.underlying_type().clone(),
+                            actual_type: field_type_info.kind(),
+                        })?
+                };
+
+                // normalize the RHS of the field
+                let normalized_field_value = normalize(
+                    schema,
+                    namespaced_getter,
+                    context,
+                    field_value,
+                    // TODO, this has to change to field info
+                    &LocationType::Field {
+                        type_: &field_info.field_type,
+                        default_value: field_info.default_value.as_ref(),
+                    },
+                    &field_type_info,
+                )?;
+
+                let normalized_input_field = normalized::InputField {
+                    name: field.clone(),
+                    info: schema::NodeInfo {
+                        generic: &field_info.info,
+                        namespaced,
+                    },
+                    value: normalized_field_value,
+                };
+
+                // if the field already exists, we throw an error
+                // (insert returns a reference to previous value)
+                if normalized_object
+                    .insert(field.clone(), normalized_input_field)
+                    .is_some()
+                {
+                    return Err(Error::DuplicateInputFields {
                         type_name: field_type.underlying_type().clone(),
-                        actual_type: field_type_info.kind(),
-                    })?
-            };
+                        field: field.clone(),
+                    });
+                }
 
-            // normalize the RHS of the field
-            let normalized_field_value = normalize(
-                schema,
-                namespace,
-                context,
-                field_value,
-                // TODO, this has to change to field info
-                &LocationType::Field {
-                    type_: &field_info.field_type,
-                    default_value: field_info.default_value.as_ref(),
-                },
-                &field_type_info,
-            )?;
-
-            let normalized_input_field = normalized::InputField {
-                name: field.clone(),
-                info: schema::NodeInfo {
-                    generic: &field_info.info,
-                    namespaced,
-                },
-                value: normalized_field_value,
-            };
-
-            // if the field already exists, we throw an error
-            // (insert returns a reference to previous value)
-            if normalized_object
-                .insert(field.clone(), normalized_input_field)
-                .is_some()
-            {
-                return Err(Error::DuplicateInputFields {
-                    type_name: field_type.underlying_type().clone(),
-                    field: field.clone(),
-                });
-            }
-
-            // count all non-nullable fields
-            // if !field_info.data.field_type.nullable {
-            //     required_field_count += 1;
-            // };
-            // Ok((normalized_object, required_field_count))
-            Ok(normalized_object)
-        },
-    )?;
+                // count all non-nullable fields
+                // if !field_info.data.field_type.nullable {
+                //     required_field_count += 1;
+                // };
+                // Ok((normalized_object, required_field_count))
+                Ok(normalized_object)
+            },
+        )?;
 
     // all the non-nullable fields MUST be present
     // if required_field_count != input_object.required_field_count() {
@@ -337,7 +380,7 @@ mod test {
         // Test if foo: [Int] = [1,2,3] is coerced to [1,2,3]
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -352,7 +395,7 @@ mod test {
         ]);
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -367,7 +410,7 @@ mod test {
         // Test if foo: [Int] = 1 is coerced to [1]
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -380,7 +423,7 @@ mod test {
         )]);
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -395,7 +438,7 @@ mod test {
         // Test if foo: [Int] = null is coerced to null
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -406,7 +449,7 @@ mod test {
         let expected_value = normalized_ast::Value::SimpleValue(normalized_ast::SimpleValue::Null);
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -421,7 +464,7 @@ mod test {
         // Test if foo: [Int] = [1, "b", true] is not coerced
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -434,7 +477,7 @@ mod test {
         let location_type = List { type_: &list_int() };
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -448,7 +491,7 @@ mod test {
         // Test if foo: [[Int]] = 1 is coerced to [[1]]
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -463,7 +506,7 @@ mod test {
         ])]);
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -478,7 +521,7 @@ mod test {
         // Test if foo: [[Int]] = [1,2,3] is not coerced
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -490,7 +533,7 @@ mod test {
         };
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -504,7 +547,7 @@ mod test {
         // Test if foo: [[Int]] = null is coerced to null
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -517,7 +560,7 @@ mod test {
         let expected_value = normalized_ast::Value::SimpleValue(normalized_ast::SimpleValue::Null);
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,
@@ -532,7 +575,7 @@ mod test {
         // Test if foo: [[Int]] = [[1], [2, 3]] is coerced to [[1], [2, 3]]
         let int_typename = ast::TypeName(mk_name!("Int"));
         let int_scalar = Scalar {
-            name: int_typename.clone(),
+            name: int_typename,
             description: None,
             directives: vec![],
         };
@@ -556,7 +599,7 @@ mod test {
         ]);
         let normalized_value = normalize::normalize(
             &schema,
-            &sdl::Namespace,
+            &sdl::SDLNamespacedGetter(),
             &(),
             &value,
             &location_type,

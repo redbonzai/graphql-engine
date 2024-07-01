@@ -23,7 +23,7 @@ impl Serialize for SDL {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(format!("{:?}", self).as_str())
+        serializer.serialize_str(format!("{self:?}").as_str())
     }
 }
 
@@ -141,14 +141,23 @@ impl Display for Namespace {
     }
 }
 
+pub struct SDLNamespacedGetter();
+
+impl NamespacedGetter<SDL> for SDLNamespacedGetter {
+    fn get<'s, C>(
+        &self,
+        namespaced: &'s Namespaced<SDL, C>,
+    ) -> Option<(&'s C, &'s <SDL as SchemaContext>::NamespacedNodeInfo)> {
+        Some((&namespaced.data, &()))
+    }
+}
+
 impl SchemaContext for SDL {
     type Namespace = Namespace;
     type GenericNodeInfo = ();
     type NamespacedNodeInfo = ();
 
     fn introspection_node() -> Self::GenericNodeInfo {}
-
-    fn introspection_namespace_node() -> Self::NamespacedNodeInfo {}
 
     type TypeId = ast::Name;
 
@@ -178,7 +187,7 @@ impl SchemaContext for SDL {
                 _ => builder_in_closure.register_type(type_name.0),
             },
             definition,
-        )?)
+        ))
     }
 
     fn get_schema_entry_point(&self) -> EntryPoint<Self> {

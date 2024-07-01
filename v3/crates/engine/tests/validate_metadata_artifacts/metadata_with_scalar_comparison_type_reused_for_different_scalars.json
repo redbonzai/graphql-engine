@@ -134,9 +134,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "ArticleByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -149,9 +147,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "AuthorByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -215,7 +211,11 @@
             "query": {
               "aggregates": {},
               "variables": {},
-              "explain": {}
+              "explain": {},
+              "nested_fields": {
+                "filter_by": {},
+                "order_by": {}
+              }
             },
             "relationships": {
               "relation_comparisons": {},
@@ -223,7 +223,7 @@
             },
             "mutation": {}
           },
-          "version": "0.1.0"
+          "version": "0.1.3"
         }
       }
     }
@@ -356,9 +356,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "ArticleByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -371,9 +369,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "AuthorByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -437,7 +433,11 @@
             "query": {
               "aggregates": {},
               "variables": {},
-              "explain": {}
+              "explain": {},
+              "nested_fields": {
+                "filter_by": {},
+                "order_by": {}
+              }
             },
             "relationships": {
               "relation_comparisons": {},
@@ -445,7 +445,7 @@
             },
             "mutation": {}
           },
-          "version": "0.1.0"
+          "version": "0.1.3"
         }
       }
     }
@@ -469,9 +469,7 @@
           "type": "String!"
         }
       ],
-      "globalIdFields": [
-        "author_id"
-      ],
+      "globalIdFields": ["author_id"],
       "graphql": {
         "typeName": "Author"
       },
@@ -519,9 +517,7 @@
           "type": "Int!"
         }
       ],
-      "globalIdFields": [
-        "article_id"
-      ],
+      "globalIdFields": ["article_id"],
       "graphql": {
         "typeName": "Article"
       },
@@ -619,9 +615,7 @@
         "selectUniques": [
           {
             "queryRootField": "AuthorByID",
-            "uniqueIdentifier": [
-              "author_id"
-            ]
+            "uniqueIdentifier": ["author_id"]
           }
         ],
         "selectMany": {
@@ -700,9 +694,7 @@
         "selectUniques": [
           {
             "queryRootField": "ArticleByID",
-            "uniqueIdentifier": [
-              "article_id"
-            ]
+            "uniqueIdentifier": ["article_id"]
           }
         ],
         "selectMany": {
@@ -720,7 +712,7 @@
       "dataConnectorScalarType": "String",
       "representation": "String",
       "graphql": {
-        "comparisonExpressionTypeName": "String_Comparison_Exp"
+        "comparisonExpressionTypeName": "String_Comparison_Exp_DB1"
       }
     }
   },
@@ -732,7 +724,7 @@
       "dataConnectorScalarType": "String",
       "representation": "String",
       "graphql": {
-        "comparisonExpressionTypeName": "String_Comparison_Exp"
+        "comparisonExpressionTypeName": "String_Comparison_Exp_DB2"
       }
     }
   },

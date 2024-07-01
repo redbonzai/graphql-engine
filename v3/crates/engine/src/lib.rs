@@ -1,9 +1,6 @@
 pub mod authentication;
 pub mod build;
-pub mod execute;
-pub mod metadata;
-pub mod schema;
-pub mod utils;
+pub mod internal_flags;
 
 // This is set by the build.rs script.
 /// The version of the v3-engine release.

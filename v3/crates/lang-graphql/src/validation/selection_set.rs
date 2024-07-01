@@ -13,8 +13,13 @@ use crate::ast::spanning::Spanning;
 use crate::normalized_ast as normalized;
 use crate::schema;
 
-pub fn normalize_selection_set<'q, 's, S: schema::SchemaContext>(
-    namespace: &S::Namespace,
+pub fn normalize_selection_set<
+    'q,
+    's,
+    S: schema::SchemaContext,
+    NSGet: schema::NamespacedGetter<S>,
+>(
+    namespaced_getter: &NSGet,
     schema: &'s schema::Schema<S>,
     fragments: &HashMap<&'q ast::Name, &'q executable::FragmentDefinition>,
     variables: &input::value::Variables<'q, 's, S>,
@@ -27,7 +32,7 @@ where
 {
     let reachability = Vec::new();
     normalize_selection_sets(
-        namespace,
+        namespaced_getter,
         schema,
         fragments,
         variables,
@@ -37,8 +42,8 @@ where
 }
 
 #[allow(clippy::type_complexity)]
-fn normalize_selection_sets<'q, 's, S: schema::SchemaContext>(
-    namespace: &S::Namespace,
+fn normalize_selection_sets<'q, 's, S: schema::SchemaContext, NSGet: schema::NamespacedGetter<S>>(
+    namespaced_getter: &NSGet,
     schema: &'s schema::Schema<S>,
     fragments: &HashMap<&'q ast::Name, &'q executable::FragmentDefinition>,
     variables: &input::value::Variables<'q, 's, S>,
@@ -58,7 +63,7 @@ where
     for (path, selection_sets) in selection_set_groups {
         for selection_set in selection_sets {
             collect::collect_fields(
-                namespace,
+                namespaced_getter,
                 schema,
                 fragments,
                 path,
@@ -91,10 +96,10 @@ where
         acc
     });
     let mut normalized_fields = IndexMap::new();
-    for (alias, (alias_type, typed_fields)) in field_map.into_iter() {
+    for (alias, (alias_type, typed_fields)) in field_map {
         let alias = ast::Alias(alias.clone());
         let (field_calls, selection_set) = merge_fields(
-            namespace,
+            namespaced_getter,
             schema,
             fragments,
             variables,
@@ -127,7 +132,7 @@ where
     };
 
     if normalized_fields.is_empty() {
-        Err(Error::FieldSelectionSetIsEmpty)?
+        Err(Error::FieldSelectionSetIsEmpty)?;
     }
 
     Ok(normalized::SelectionSet {
@@ -137,8 +142,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn merge_fields<'q, 's, S: schema::SchemaContext>(
-    namespace: &S::Namespace,
+fn merge_fields<'q, 's, S: schema::SchemaContext, NSGet: schema::NamespacedGetter<S>>(
+    namespaced_getter: &NSGet,
     schema: &'s schema::Schema<S>,
     fragments: &HashMap<&'q ast::Name, &'q executable::FragmentDefinition>,
     variables: &input::value::Variables<'q, 's, S>,
@@ -162,45 +167,42 @@ where
 
     let mut alias_selection_sets = Vec::new();
     let mut field_calls = HashMap::new();
-    for (reachability, fields) in typed_fields.into_iter() {
-        let cannonical_field = fields.head;
+    for (reachability, fields) in typed_fields {
+        let canonical_field = fields.head;
 
         let arguments = normalize_arguments(
-            namespace,
+            namespaced_getter,
             schema,
             variables,
             type_name,
-            &cannonical_field.info.generic.name,
-            &cannonical_field.info.generic.arguments,
-            &cannonical_field.field.arguments,
+            &canonical_field.info.generic.name,
+            &canonical_field.info.generic.arguments,
+            &canonical_field.field.arguments,
         )?;
-        let directives =
-            normalize_directives(namespace, schema, &cannonical_field.field.directives)?;
-
-        let cannonical_field_type = &cannonical_field.info.generic.field_type;
-        if cannonical_field_type != alias_type {
+        let canonical_field_type = &canonical_field.info.generic.field_type;
+        if canonical_field_type != alias_type {
             return Err(Error::FieldsConflictDifferingTypes {
                 alias: alias.clone(),
                 type1: alias_type.clone(),
-                type2: cannonical_field_type.clone(),
+                type2: canonical_field_type.clone(),
             });
         }
         let mut selection_sets = Vec::with_capacity(fields.len());
-        if let Some(selection_set) = &cannonical_field.field.selection_set {
+        if let Some(selection_set) = &canonical_field.field.selection_set {
             selection_sets.push(&selection_set.item.items);
         }
         for field in fields.tail() {
-            if field.field.name.item != cannonical_field.field.name.item {
+            if field.field.name.item != canonical_field.field.name.item {
                 return Err(Error::FieldsConflictDifferentFields {
                     alias: alias.clone(),
-                    field1: cannonical_field.field.name.item.clone(),
+                    field1: canonical_field.field.name.item.clone(),
                     field2: field.field.name.item.clone(),
                 });
             }
             // TODO deal with directives
-            // let this_directives = normalize_directives(namespace, schema, &field.field.directives)?;
+            // let this_directives = normalize_directives( schema, &field.field.directives)?;
             let this_arguments = normalize_arguments(
-                namespace,
+                namespaced_getter,
                 schema,
                 variables,
                 type_name,
@@ -211,7 +213,7 @@ where
             if arguments != this_arguments {
                 return Err(Error::FieldsConflictDifferingArguments {
                     alias: alias.clone(),
-                    location1: cannonical_field.field.arguments.as_ref().map(|a| a.start),
+                    location1: canonical_field.field.arguments.as_ref().map(|a| a.start),
                     location2: field.field.arguments.as_ref().map(|a| a.start),
                 });
             }
@@ -221,16 +223,15 @@ where
             }
         }
         let field_call = normalized::FieldCall {
-            name: cannonical_field.field.name.item.clone(),
+            name: canonical_field.field.name.item.clone(),
             info: schema::NodeInfo {
-                generic: &cannonical_field.info.generic.info,
-                namespaced: cannonical_field.info.namespaced,
+                generic: &canonical_field.info.generic.info,
+                namespaced: canonical_field.info.namespaced,
             },
             arguments,
-            directives,
         };
-        if cannonical_field.reachable {
-            field_calls.insert(reachability.iter().cloned().cloned().collect(), field_call);
+        if canonical_field.reachable {
+            field_calls.insert(reachability.iter().copied().cloned().collect(), field_call);
         }
         alias_selection_sets.push((reachability, selection_sets));
     }
@@ -238,7 +239,7 @@ where
     // maybe processing of alias_selection_sets can be cleaned up
     let normalized_selection_set = match alias_selectable_type {
         Some(selection_type) => normalize_selection_sets(
-            namespace,
+            namespaced_getter,
             schema,
             fragments,
             variables,
@@ -257,8 +258,8 @@ where
     ))
 }
 
-fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
-    namespace: &S::Namespace,
+fn normalize_arguments<'q, 's, S: schema::SchemaContext, NSGet: schema::NamespacedGetter<S>>(
+    namespaced_getter: &NSGet,
     schema: &'s schema::Schema<S>,
     variables: &input::value::Variables<'q, 's, S>,
     type_name: &ast::TypeName,
@@ -288,7 +289,7 @@ fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
         let argument_value = arguments_map.remove(name);
 
         // if the argument is allowed for the given namespace
-        if let Some((argument_info, namespaced)) = info.get(namespace) {
+        if let Some((argument_info, namespaced)) = namespaced_getter.get(info) {
             let argument_type = &argument_info.field_type;
             // get the information of the type in the base_type
             let argument_type_info = {
@@ -309,14 +310,14 @@ fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
             let normalized_field_value = match (argument_value, &argument_info.default_value) {
                 // Neither argument value nor default value
                 (None, None) => {
-                    if !argument_type.nullable {
+                    if argument_type.nullable {
+                        None
+                    } else {
                         return Err(Error::RequiredArgumentNotFound {
                             type_name: type_name.clone(),
                             field_name: field_name.clone(),
                             argument_name: name.clone(),
                         });
-                    } else {
-                        None
                     }
                 }
 
@@ -324,7 +325,7 @@ fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
                 (Some(argument_value), _) => {
                     Some(input::normalize::normalize(
                         schema,
-                        namespace,
+                        namespaced_getter,
                         variables,
                         argument_value,
                         // TODO, this has to change to field info
@@ -342,7 +343,7 @@ fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
                 (None, Some(default_value)) => {
                     Some(input::normalize::normalize(
                         schema,
-                        namespace,
+                        namespaced_getter,
                         &(),
                         default_value,
                         // TODO, this has to change to field info
@@ -369,11 +370,10 @@ fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
                 );
             }
 
-        // if the argument isn't allowed for the given namespace, we throw a more
+        // if the argument isn't allowed for the given  we throw a more
         // useful error message
         } else if argument_value.is_some() {
-            return Err(Error::ArgumentNotAllowed {
-                namespace: namespace.to_string(),
+            return Err(Error::ArgumentNotFound {
                 type_name: type_name.clone(),
                 field_name: field_name.clone(),
                 argument_name: name.clone(),
@@ -382,21 +382,13 @@ fn normalize_arguments<'q, 's, S: schema::SchemaContext>(
     }
 
     // Finally we check if there are any arguments that aren't defined on the field
-    if !arguments_map.is_empty() {
+    if arguments_map.is_empty() {
+        Ok(normalized_arguments)
+    } else {
         Err(Error::ArgumentsNotFound {
             type_name: type_name.clone(),
             field_name: field_name.clone(),
             argument_names: arguments_map.keys().copied().cloned().collect(),
         })
-    } else {
-        Ok(normalized_arguments)
     }
-}
-
-fn normalize_directives<'s, S: schema::SchemaContext>(
-    _namespace: &S::Namespace,
-    _schema: &'s schema::Schema<S>,
-    _directives: &[spanning::Spanning<executable::Directive>],
-) -> Result<IndexMap<ast::Name, normalized::Directive<'s, S>>> {
-    Ok(IndexMap::new())
 }

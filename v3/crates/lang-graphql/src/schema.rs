@@ -88,7 +88,6 @@ pub trait SchemaContext: std::fmt::Debug + Clone + PartialEq + Serialize {
     // Option<&GenericNodeInfo>. We can then use None to store empty information about
     // introspection fields.
     fn introspection_node() -> Self::GenericNodeInfo;
-    fn introspection_namespace_node() -> Self::NamespacedNodeInfo;
 
     // Types and functions related to schema generation.
 
@@ -127,12 +126,11 @@ impl<S: SchemaContext> Builder<S> {
         RegisteredTypeName(type_name)
     }
 
-    pub fn allow_all_namespaced<C>(
-        &mut self,
-        data: C,
-        namespaced_node_info: S::NamespacedNodeInfo,
-    ) -> Namespaced<S, C> {
-        Namespaced::new_allow_all(data, namespaced_node_info)
+    pub fn allow_all_namespaced<C>(&mut self, data: C) -> Namespaced<S, C> {
+        Namespaced {
+            namespaced: NamespacedData::AllowAll,
+            data,
+        }
     }
 
     pub fn conditional_namespaced<C>(
@@ -141,7 +139,10 @@ impl<S: SchemaContext> Builder<S> {
         map: HashMap<S::Namespace, S::NamespacedNodeInfo>,
     ) -> Namespaced<S, C> {
         self.registered_namespaces.extend(map.keys().cloned());
-        Namespaced::new_conditional(data, map)
+        Namespaced {
+            namespaced: NamespacedData::Conditional(map),
+            data,
+        }
     }
 }
 
@@ -153,43 +154,23 @@ pub struct NodeInfo<'s, S: SchemaContext> {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Namespaced<S: SchemaContext, C> {
-    namespaced: NamespacedData<S>,
-    data: C,
+    pub namespaced: NamespacedData<S>,
+    pub data: C,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-enum NamespacedData<S: SchemaContext> {
-    AllowAll(S::NamespacedNodeInfo),
+pub enum NamespacedData<S: SchemaContext> {
+    AllowAll,
     Conditional(HashMap<S::Namespace, S::NamespacedNodeInfo>),
 }
 
-impl<S: SchemaContext, C> Namespaced<S, C> {
-    // Not exposed, only accessible to Builder::allow_all_namespaced
-    fn new_allow_all(data: C, namespaced_node_info: S::NamespacedNodeInfo) -> Self {
-        Namespaced {
-            namespaced: NamespacedData::AllowAll(namespaced_node_info),
-            data,
-        }
-    }
-
-    // Not exposed, only accessible to Builder::conditional_namespaced
-    fn new_conditional(data: C, map: HashMap<S::Namespace, S::NamespacedNodeInfo>) -> Self {
-        Namespaced {
-            namespaced: NamespacedData::Conditional(map),
-            data,
-        }
-    }
-
-    pub fn get(&self, namespace: &S::Namespace) -> Option<(&C, &S::NamespacedNodeInfo)> {
-        match &self.namespaced {
-            NamespacedData::AllowAll(namespaced_node_info) => {
-                Some((&self.data, namespaced_node_info))
-            }
-            NamespacedData::Conditional(map) => map
-                .get(namespace)
-                .map(|namespaced_node_info| (&self.data, namespaced_node_info)),
-        }
-    }
+/// A 'NamespacedGetter' is a function that interprets what it means to extract a
+/// `NamespacedNodeInfo` from a `Namespaced` value.
+pub trait NamespacedGetter<S: SchemaContext> {
+    fn get<'s, C>(
+        &self,
+        namespaced: &'s Namespaced<S, C>,
+    ) -> Option<(&'s C, &'s S::NamespacedNodeInfo)>;
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
@@ -204,7 +185,7 @@ pub enum DeprecationStatus {
 impl DeprecationStatus {
     pub fn new_deprecated(description: Option<&str>) -> Self {
         DeprecationStatus::Deprecated {
-            reason: description.map(|s| s.to_string()),
+            reason: description.map(ToString::to_string),
         }
     }
 
@@ -237,20 +218,17 @@ pub struct Object<S: SchemaContext> {
 }
 
 fn build_typename_field<S: SchemaContext>(builder: &mut Builder<S>) -> Namespaced<S, Field<S>> {
-    builder.allow_all_namespaced(
-        Field {
-            name: mk_name!("__typename"),
-            description: None,
-            info: S::introspection_node(),
-            field_type: ast::Type {
-                base: ast::BaseType::Named(TypeName(mk_name!("String"))),
-                nullable: false,
-            },
-            arguments: BTreeMap::new(),
-            deprecation_status: DeprecationStatus::NotDeprecated,
+    builder.allow_all_namespaced(Field {
+        name: mk_name!("__typename"),
+        description: None,
+        info: S::introspection_node(),
+        field_type: ast::Type {
+            base: ast::BaseType::Named(TypeName(mk_name!("String"))),
+            nullable: false,
         },
-        S::introspection_namespace_node(),
-    )
+        arguments: BTreeMap::new(),
+        deprecation_status: DeprecationStatus::NotDeprecated,
+    })
 }
 
 impl<S: SchemaContext> Object<S> {

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 
 use crate::{impl_OpenDd_default_for, map_impl, seq_impl};
+use jsonschema_tidying::deduplicate_definitions;
 
 mod macros;
 
@@ -18,7 +19,7 @@ mod macros;
 /// of serde. This trait is a workaround for that limitation.
 /// Use `opendds_derive::OpenDd` derive macro to implement this trait for your types.
 /// See the README.md in `opendds-derive` crate for more details.
-/// Refs: https://github.com/serde-rs/serde/issues/1183, https://github.com/serde-rs/serde/issues/1495
+/// Refs: <https://github.com/serde-rs/serde/issues/1183>, <https://github.com/serde-rs/serde/issues/1495>
 pub trait OpenDd: Sized {
     fn deserialize(json: serde_json::Value) -> Result<Self, OpenDdDeserializeError>;
 
@@ -36,6 +37,20 @@ impl_OpenDd_default_for!(bool);
 impl_OpenDd_default_for!(i32);
 impl_OpenDd_default_for!(u32);
 impl_OpenDd_default_for!(());
+
+impl<T: OpenDd> OpenDd for Box<T> {
+    fn deserialize(json: serde_json::Value) -> Result<Self, OpenDdDeserializeError> {
+        T::deserialize(json).map(Box::new)
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        T::json_schema(gen)
+    }
+
+    fn _schema_name() -> String {
+        T::_schema_name()
+    }
+}
 
 impl<T: OpenDd> OpenDd for Option<T> {
     fn deserialize(json: serde_json::Value) -> Result<Self, OpenDdDeserializeError> {
@@ -87,7 +102,7 @@ impl<T: OpenDd> OpenDd for Option<T> {
 fn add_null_type(instance_type: &mut SingleOrVec<InstanceType>) {
     match instance_type {
         SingleOrVec::Single(ty) if **ty != InstanceType::Null => {
-            *instance_type = vec![**ty, InstanceType::Null].into()
+            *instance_type = vec![**ty, InstanceType::Null].into();
         }
         SingleOrVec::Vec(ty) if !ty.contains(&InstanceType::Null) => ty.push(InstanceType::Null),
         _ => {}
@@ -148,7 +163,7 @@ pub fn gen_root_schema_for<T: OpenDd>(
 
     let mut root_schema = gen.root_schema_for::<Wrapper<T>>();
     // Generate `$id` metadata field for subschemas
-    for (schema_name, schema) in root_schema.definitions.iter_mut() {
+    for (schema_name, schema) in &mut root_schema.definitions {
         if let schemars::schema::Schema::Object(ref mut object) = schema {
             // Don't set $id for references, the $id should be set on the referenced schema
             if !object.is_ref() {
@@ -167,6 +182,8 @@ pub fn gen_root_schema_for<T: OpenDd>(
             }
         }
     }
+
+    deduplicate_definitions(&mut root_schema);
     root_schema
 }
 
@@ -193,8 +210,8 @@ impl std::fmt::Display for JSONPath {
             .0
             .iter()
             .map(|element| match element {
-                JSONPathElement::Key(key) => format!(".{}", key),
-                JSONPathElement::Index(index) => format!("[{}]", index),
+                JSONPathElement::Key(key) => format!(".{key}"),
+                JSONPathElement::Index(index) => format!("[{index}]"),
             })
             .collect::<Vec<String>>();
         let mut path = vec!["$".to_string()];
@@ -288,7 +305,7 @@ mod tests {
             name: "Foo".to_string(),
             age: 25,
         });
-        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap())
+        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap());
     }
 
     #[test]
@@ -313,7 +330,7 @@ mod tests {
             name: "Foo".to_string(),
             age: 25,
         });
-        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap())
+        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap());
     }
 
     #[test]
@@ -340,7 +357,7 @@ mod tests {
                 .unwrap_err()
                 .error
                 .to_string()
-        )
+        );
     }
 
     #[test]
@@ -369,12 +386,12 @@ mod tests {
                 .unwrap_err()
                 .path
                 .to_string()
-        )
+        );
     }
 
     // Untagged enum deserialize tests
 
-    use strum_macros::EnumVariantNames;
+    use strum_macros::VariantNames;
 
     #[derive(Debug, PartialEq, OpenDd)]
     #[opendd(untagged_with_kind)]
@@ -383,14 +400,14 @@ mod tests {
         Two(KindEnumTwo),
     }
 
-    #[derive(Debug, PartialEq, EnumVariantNames, OpenDd)]
+    #[derive(Debug, PartialEq, VariantNames, OpenDd)]
     #[opendd(as_kind)]
     enum KindEnumOne {
         First(FirstStruct),
         Second(SecondStruct),
     }
 
-    #[derive(Debug, PartialEq, EnumVariantNames, OpenDd)]
+    #[derive(Debug, PartialEq, VariantNames, OpenDd)]
     #[opendd(as_kind)]
     enum KindEnumTwo {
         Third(ThirdStruct),
@@ -425,7 +442,7 @@ mod tests {
             first: "First".to_string(),
             second: "Second".to_string(),
         }));
-        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap())
+        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap());
     }
 
     #[test]
@@ -531,7 +548,7 @@ mod tests {
             ],
         };
 
-        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap())
+        assert_eq!(expected, traits::OpenDd::deserialize(json).unwrap());
     }
 
     #[test]
@@ -561,7 +578,7 @@ mod tests {
                 .unwrap_err()
                 .error
                 .to_string()
-        )
+        );
     }
 
     #[test]
@@ -594,7 +611,7 @@ mod tests {
                 .unwrap_err()
                 .path
                 .to_string()
-        )
+        );
     }
 
     #[test]
@@ -611,7 +628,7 @@ mod tests {
                 .unwrap_err()
                 .error
                 .to_string(),
-        )
+        );
     }
 
     #[test]
@@ -692,6 +709,100 @@ mod tests {
                         "additionalProperties": false
                     }
                 }
+            }
+        );
+
+        assert_eq!(
+            serde_json::to_string_pretty(&exp).unwrap(),
+            serde_json::to_string_pretty(&root_schema).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_json_schema_enum_with_hidden_item() {
+        #[derive(PartialEq, opendds_derive::OpenDd)]
+        #[opendd(json_schema(title = "Dog"))]
+        // a dog
+        struct Dog {
+            name: String,
+        }
+
+        #[derive(PartialEq, opendds_derive::OpenDd)]
+        #[opendd(json_schema(title = "Cat"))]
+        // a cat
+        struct Cat {
+            name: String,
+        }
+
+        #[derive(PartialEq, opendds_derive::OpenDd)]
+        #[opendd(json_schema(title = "Horse"))]
+        // a horse
+        struct Horse {
+            name: String,
+        }
+
+        #[derive(PartialEq, opendds_derive::OpenDd)]
+        #[opendd(as_kind, json_schema(title = "Animal"))]
+        /// The name of some kind of animal.
+        enum Animal {
+            Dog(Dog),
+            Cat(Cat),
+            #[opendd(hidden = true)]
+            Horse(Horse),
+        }
+
+        let mut gen = schemars::gen::SchemaGenerator::default();
+        let root_schema = traits::gen_root_schema_for::<Animal>(&mut gen);
+        let exp = serde_json::json!(
+            {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "$id": "https://hasura.io/jsonschemas/metadata/Animal",
+                "title": "Animal",
+                "description": "The name of some kind of animal.",
+                "oneOf": [
+                    {
+                        "$id": "https://hasura.io/jsonschemas/metadata/Dog",
+                        "title": "Dog",
+                        "type": "object",
+                        "required": [
+                            "kind",
+                            "name"
+                        ],
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "Dog"
+                                ]
+                            },
+                            "name": {
+                                "type":"string"
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    {
+                        "$id": "https://hasura.io/jsonschemas/metadata/Cat",
+                        "title": "Cat",
+                        "type": "object",
+                        "required": [
+                            "kind",
+                            "name"
+                        ],
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "Cat"
+                                ]
+                            },
+                            "name": {
+                                "type":"string"
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                ]
             }
         );
 

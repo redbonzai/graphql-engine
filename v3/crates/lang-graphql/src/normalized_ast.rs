@@ -26,11 +26,10 @@ pub enum Error {
     #[error("empty type_name found for an object selection set")]
     NoTypenameFound,
 
-    // TODO, uses 'Debug' trait
-    #[error("value not as expected, expected: {expected_kind} but found: {found:?}")]
+    #[error("value not as expected, expected: {expected_kind} but found: {found}")]
     UnexpectedValue {
         expected_kind: &'static str,
-        found: core::result::Result<json::Value, json::Error>,
+        found: json::Value,
     },
 }
 
@@ -98,7 +97,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             }
             Value::List(xs) => serde_json::Value::from(
                 xs.iter()
-                    .map(|x| x.as_json())
+                    .map(Value::as_json)
                     .collect::<Vec<serde_json::Value>>(),
             ),
             Value::Object(xs) => serde_json::Value::Object(
@@ -115,7 +114,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::SimpleValue(SimpleValue::Boolean(b)) => Ok(*b),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "BOOLEAN",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -125,11 +124,12 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::SimpleValue(SimpleValue::String(s)) => Ok(s.as_str()),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "STRING",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
 
+    #[allow(clippy::cast_precision_loss)]
     pub fn as_float(&self) -> Result<f64> {
         match self {
             // Both integer and float input values are accepted for Float type.
@@ -138,7 +138,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::SimpleValue(SimpleValue::Integer(i)) => Ok(*i as f64),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "FLOAT",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -147,13 +147,13 @@ impl<'s, S: SchemaContext> Value<'s, S> {
         match self {
             Value::SimpleValue(SimpleValue::Integer(i)) => {
                 u32::try_from(*i).map_err(|_e| Error::UnexpectedValue {
-                    expected_kind: "u32",
-                    found: json::to_value(self),
+                    expected_kind: "NON-NEGATIVE 32-bit INT",
+                    found: self.as_json(),
                 })
             }
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "INT",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -163,7 +163,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::SimpleValue(SimpleValue::Integer(i)) => Ok(*i),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "INT",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -173,7 +173,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::Object(fields) => Ok(fields),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "OBJECT",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -183,7 +183,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::List(values) => Ok(values),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "LIST",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -193,7 +193,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::SimpleValue(SimpleValue::Id(s)) => Ok(s.to_string()),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "ID",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -207,7 +207,7 @@ impl<'s, S: SchemaContext> Value<'s, S> {
             Value::SimpleValue(SimpleValue::Enum(val)) => Ok(val),
             _ => Err(Error::UnexpectedValue {
                 expected_kind: "ENUM",
-                found: json::to_value(self),
+                found: self.as_json(),
             }),
         }
     }
@@ -226,8 +226,6 @@ pub struct FieldCall<'s, S: SchemaContext> {
     pub info: NodeInfo<'s, S>,
     /// The arguments to the field, empty if no arguments are provided.
     pub arguments: IndexMap<ast::Name, InputField<'s, S>>,
-    /// The directives in the field selector.
-    pub directives: IndexMap<ast::Name, Directive<'s, S>>,
 }
 
 impl<'s, S: SchemaContext> FieldCall<'s, S> {
@@ -292,10 +290,10 @@ impl<'s, S: SchemaContext> SelectionSet<'s, S> {
     ///  be retained and also the `title` field's `FieldCalls` key will now be an empty vector.
     pub fn filter_field_calls_by_typename(&self, type_name: ast::TypeName) -> SelectionSet<'s, S> {
         let mut filtered_selection_set_fields = IndexMap::new();
-        for (alias, field) in self.fields.iter() {
+        for (alias, field) in &self.fields {
             let mut field_calls = HashMap::new();
             let mut should_retain = false;
-            for (type_name_path, field_call) in field.field_calls.iter() {
+            for (type_name_path, field_call) in &field.field_calls {
                 match type_name_path.as_slice() {
                     [] => {
                         field_calls.insert(vec![], field_call.clone());

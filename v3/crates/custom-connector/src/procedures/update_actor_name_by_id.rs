@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use ndc_models;
 
 use crate::{
     query::{eval_nested_field, Result},
@@ -58,20 +58,34 @@ pub(crate) fn execute(
             details: serde_json::Value::Null,
         }),
     ))?;
-    let id_int = id.as_i64().ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(ndc_models::ErrorResponse {
-            message: "argument 'id' is not an integer".into(),
-            details: serde_json::Value::Null,
-        }),
-    ))?;
+    let id_int = id
+        .as_i64()
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            Json(ndc_models::ErrorResponse {
+                message: "argument 'id' is not an integer".into(),
+                details: serde_json::Value::Null,
+            }),
+        ))?
+        .try_into()
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ndc_models::ErrorResponse {
+                    message: "argument 'id' is out of range".into(),
+                    details: serde_json::Value::Null,
+                }),
+            )
+        })?;
 
     let current_state = state.actors.clone();
     let old_row = current_state.get(&id_int);
     match &old_row {
         Some(actor_obj) => {
-            let mut new_row =
-                BTreeMap::from_iter(actor_obj.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let mut new_row = actor_obj
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<BTreeMap<_, _>>();
             new_row.insert("name".into(), name.clone());
             state.actors.insert(id_int, new_row);
             let output_row = state.actors.get(&id_int);

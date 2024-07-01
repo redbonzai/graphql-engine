@@ -1,10 +1,11 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use engine::execute::plan::{execute_mutation_plan, execute_query_plan, generate_request_plan};
-use engine::execute::{execute_query_internal, generate_ir};
-use engine::schema::GDS;
+use core::time::Duration;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode};
+use execute::{execute_mutation_plan, execute_query_plan, generate_request_plan};
+use execute::{execute_query_internal, generate_ir, HttpContext};
 use hasura_authn_core::Identity;
 use lang_graphql::http::RawRequest;
 use open_dds::permissions::Role;
+use schema::GDS;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -25,8 +26,8 @@ pub fn merge_with_common_metadata(
     let common_metadata = fs::read_to_string(common_metadata_path).unwrap();
     let test_metadata = fs::read_to_string(metadata_path_string).unwrap();
 
-    let mut first_json_value: Value = serde_json::from_str(&common_metadata.to_string()).unwrap();
-    let second_json_value: Value = serde_json::from_str(&test_metadata.to_string()).unwrap();
+    let mut first_json_value: Value = serde_json::from_str(&common_metadata).unwrap();
+    let second_json_value: Value = serde_json::from_str(&test_metadata).unwrap();
     first_json_value.merge(&second_json_value);
     first_json_value
 }
@@ -45,10 +46,13 @@ pub fn bench_execute(
     let metadata_path = test_path.join("metadata.json");
     let metadata = merge_with_common_metadata(&metadata_path, &common_metadata_path);
 
-    let gds = GDS::new(open_dds::traits::OpenDd::deserialize(metadata).unwrap()).unwrap();
+    let gds = GDS::new_with_default_flags(open_dds::traits::OpenDd::deserialize(metadata).unwrap())
+        .unwrap();
     let schema = GDS::build_schema(&gds).unwrap();
-
-    let http_client = reqwest::Client::new();
+    let http_context = HttpContext {
+        client: reqwest::Client::new(),
+        ndc_response_size_limit: None,
+    };
     let runtime = Runtime::new().unwrap();
 
     let query = fs::read_to_string(request_path).unwrap();
@@ -58,12 +62,18 @@ pub fn bench_execute(
         variables: None,
     };
 
+    let request_headers = reqwest::header::HeaderMap::new();
     let session = Identity::admin(Role::new("admin"))
         .get_role_authorization(None)
         .unwrap()
         .build_session(HashMap::new());
 
     let mut group = c.benchmark_group(benchmark_group);
+
+    // these numbers are fairly low, optimising for runtime of benchmark suite
+    group.warm_up_time(Duration::from_millis(500));
+    group.sample_size(20);
+    group.sampling_mode(SamplingMode::Flat);
 
     // Parse request
     group.bench_with_input(
@@ -74,7 +84,7 @@ pub fn bench_execute(
                 gql::parser::Parser::new(&request.query)
                     .parse_executable_document()
                     .unwrap()
-            })
+            });
         },
     );
 
@@ -94,25 +104,39 @@ pub fn bench_execute(
         &(&runtime, &schema, &request),
         |b, (runtime, schema, request)| {
             b.to_async(*runtime).iter(|| async {
-                gql::validation::normalize_request(&session.role, schema, request).unwrap();
-            })
+                gql::validation::normalize_request(
+                    &schema::GDSRoleNamespaceGetter {
+                        scope: session.role.clone(),
+                    },
+                    schema,
+                    request,
+                )
+                .unwrap();
+            });
         },
     );
 
-    let normalized_request =
-        gql::validation::normalize_request(&session.role, &schema, &request).unwrap();
+    let normalized_request = gql::validation::normalize_request(
+        &schema::GDSRoleNamespaceGetter {
+            scope: session.role.clone(),
+        },
+        &schema,
+        &request,
+    )
+    .unwrap();
 
     // Generate IR
     group.bench_with_input(
         BenchmarkId::new("bench_execute", "Generate IR"),
         &(&runtime, &schema),
         |b, (runtime, schema)| {
-            b.to_async(*runtime)
-                .iter(|| async { generate_ir(schema, &session, &normalized_request).unwrap() })
+            b.to_async(*runtime).iter(|| async {
+                generate_ir(schema, &session, &request_headers, &normalized_request).unwrap()
+            });
         },
     );
 
-    let ir = generate_ir(&schema, &session, &normalized_request).unwrap();
+    let ir = generate_ir(&schema, &session, &request_headers, &normalized_request).unwrap();
 
     // Generate Query Plan
     group.bench_with_input(
@@ -120,7 +144,7 @@ pub fn bench_execute(
         &(&runtime),
         |b, runtime| {
             b.to_async(*runtime)
-                .iter(|| async { generate_request_plan(&ir).unwrap() })
+                .iter(|| async { generate_request_plan(&ir).unwrap() });
         },
     );
 
@@ -131,14 +155,14 @@ pub fn bench_execute(
         |b, runtime| {
             b.to_async(*runtime).iter(|| async {
                 match generate_request_plan(&ir).unwrap() {
-                    engine::execute::plan::RequestPlan::QueryPlan(query_plan) => {
-                        execute_query_plan(&http_client, query_plan, None).await
+                    execute::RequestPlan::QueryPlan(query_plan) => {
+                        execute_query_plan(&http_context, query_plan, None).await
                     }
-                    engine::execute::plan::RequestPlan::MutationPlan(mutation_plan) => {
-                        execute_mutation_plan(&http_client, mutation_plan, None).await
+                    execute::RequestPlan::MutationPlan(mutation_plan) => {
+                        execute_mutation_plan(&http_context, mutation_plan, None).await
                     }
                 }
-            })
+            });
         },
     );
 
@@ -148,10 +172,18 @@ pub fn bench_execute(
         &(&runtime, &schema, raw_request),
         |b, (runtime, schema, request)| {
             b.to_async(*runtime).iter(|| async {
-                execute_query_internal(&http_client, schema, &session, request.clone(), None)
-                    .await
-                    .unwrap()
-            })
+                execute_query_internal(
+                    execute::ExposeInternalErrors::Expose,
+                    &http_context,
+                    schema,
+                    &session,
+                    &request_headers,
+                    request.clone(),
+                    None,
+                )
+                .await
+                .unwrap()
+            });
         },
     );
 

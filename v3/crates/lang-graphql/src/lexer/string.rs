@@ -1,4 +1,3 @@
-use core::slice::Iter;
 use std::cmp::min;
 use std::str::from_utf8_unchecked;
 use thiserror::Error;
@@ -75,8 +74,8 @@ fn num_bytes_in_char(first_byte: u8) -> usize {
     }
 }
 
-fn is_whitespace(b: &u8) -> bool {
-    *b == b' ' || *b == b'\t'
+fn is_whitespace(b: u8) -> bool {
+    b == b' ' || b == b'\t'
 }
 
 struct Line {
@@ -94,13 +93,13 @@ impl Line {
         self.start = min(self.start + count, self.end);
     }
 
-    fn iter<'a>(&self, bytes: &'a [u8]) -> Iter<'a, u8> {
-        bytes[self.start..self.end].iter()
+    fn iter<'bytes>(&self, bytes: &'bytes [u8]) -> impl Iterator<Item = u8> + 'bytes {
+        bytes[self.start..self.end].iter().copied()
     }
 
     fn append_to(&self, bytes: &[u8], s: &mut String) {
         let mut i = self.start;
-        for &escape_char_i in self.escape_chars.iter() {
+        for &escape_char_i in &self.escape_chars {
             s.push_str(unsafe { from_utf8_unchecked(&bytes[i..escape_char_i]) });
             i = escape_char_i + 1;
         }
@@ -151,7 +150,7 @@ fn parse_block_string(bytes: &[u8]) -> Result<(String, Consumed, usize), (Error,
                 i += 2;
                 cur_line = Line::new(i);
             }
-            [b'\n', ..] | [b'\r', ..] => {
+            [b'\n' | b'\r', ..] => {
                 cur_line.end = i;
                 lines.push(cur_line);
                 consumed.count_line_break();
@@ -179,7 +178,7 @@ fn parse_block_string(bytes: &[u8]) -> Result<(String, Consumed, usize), (Error,
         .skip(1)
         // Don't consider whitespace only lines
         .filter_map(|line| {
-            let indent = line.iter(bytes).take_while(|b| is_whitespace(b)).count();
+            let indent = line.iter(bytes).take_while(|b| is_whitespace(*b)).count();
             (indent < line.len()).then_some(indent)
         })
         // The minimum of all indents would be the common indent
@@ -187,7 +186,7 @@ fn parse_block_string(bytes: &[u8]) -> Result<(String, Consumed, usize), (Error,
 
     // Trim the common indentation from the lines (excluding the first line)
     if let Some(common_indent) = common_indent {
-        for line in lines[1..].iter_mut() {
+        for line in &mut lines[1..] {
             line.trim_front(common_indent);
         }
     }
@@ -268,8 +267,7 @@ fn parse_single_line_string(bytes: &[u8]) -> Result<(String, Consumed, usize), (
                             let c = std::char::from_u32(code_point).ok_or_else(|| {
                                 (
                                     Error::InvalidUnicodeEscapeSequence(format!(
-                                        "0x{:X} is not a valid code point",
-                                        code_point
+                                        "0x{code_point:X} is not a valid code point"
                                     )),
                                     Consumed::no_line_break(chars),
                                 )

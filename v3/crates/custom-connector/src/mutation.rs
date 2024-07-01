@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use ndc_models;
 
 use crate::{procedures, state::AppState};
 
@@ -9,11 +9,11 @@ type Result<A> = std::result::Result<A, (StatusCode, Json<ndc_models::ErrorRespo
 
 pub fn execute_mutation_request(
     state: &AppState,
-    request: ndc_models::MutationRequest,
+    request: &ndc_models::MutationRequest,
 ) -> Result<ndc_models::MutationResponse> {
     let mut operation_results = vec![];
 
-    for operation in request.operations.iter() {
+    for operation in &request.operations {
         let operation_result =
             execute_mutation_operation(state, &request.collection_relationships, operation)?;
         operation_results.push(operation_result);

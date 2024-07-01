@@ -115,6 +115,7 @@ import Hasura.GraphQL.Transport.WebSocket.Server qualified as WS
 import Hasura.GraphQL.Transport.WebSocket.Types (WSServerEnv (..))
 import Hasura.Logging
 import Hasura.Metadata.Class
+import Hasura.NativeQuery.Validation (DisableNativeQueryValidation)
 import Hasura.PingSources
 import Hasura.Prelude
 import Hasura.QueryTags
@@ -538,6 +539,7 @@ initialiseAppContext env serveOptions AppInit {..} = do
   -- Create the schema cache
   rebuildableSchemaCache <-
     buildFirstSchemaCache
+      (soDisableNativeQueryValidation serveOptions)
       env
       logger
       (mkPgSourceResolver pgLogger)
@@ -601,6 +603,7 @@ migrateCatalogAndFetchMetadata
 -- and avoid a breaking change.
 buildFirstSchemaCache ::
   (MonadIO m) =>
+  DisableNativeQueryValidation ->
   Env.Environment ->
   Logger Hasura ->
   SourceResolver ('Postgres 'Vanilla) ->
@@ -612,6 +615,7 @@ buildFirstSchemaCache ::
   Maybe SchemaRegistry.SchemaRegistryContext ->
   m RebuildableSchemaCache
 buildFirstSchemaCache
+  disableNativeQueryValidation
   env
   logger
   pgSourceResolver
@@ -625,7 +629,7 @@ buildFirstSchemaCache
     result <-
       runExceptT
         $ runCacheBuild cacheBuildParams
-        $ buildRebuildableSchemaCache logger env metadataWithVersion cacheDynamicConfig mSchemaRegistryContext
+        $ buildRebuildableSchemaCache logger env disableNativeQueryValidation metadataWithVersion cacheDynamicConfig mSchemaRegistryContext
     result `onLeft` \err -> do
       -- TODO: we used to bundle the first schema cache build with the catalog
       -- migration, using the same error handler for both, meaning that an
@@ -693,7 +697,7 @@ instance HasCacheStaticConfig AppM where
 
 instance MonadTrace AppM where
   newTraceWith c p n (AppM a) = AppM $ newTraceWith c p n a
-  newSpanWith i n (AppM a) = AppM $ newSpanWith i n a
+  newSpanWith i n k (AppM a) = AppM $ newSpanWith i n k a
   attachMetadata = AppM . attachMetadata
 
 instance MonadTraceContext AppM where
@@ -883,10 +887,16 @@ updateJwkCtxThread ::
   HTTP.Manager ->
   Logger Hasura ->
   m Void
-updateJwkCtxThread getAppCtx httpManager logger = forever $ do
-  authMode <- liftIO $ acAuthMode <$> getAppCtx
-  updateJwkCtx authMode httpManager logger
-  liftIO $ sleep $ seconds 1
+updateJwkCtxThread getAppCtx httpManager logger = do
+  let sleepSeconds = 60
+  forever $ do
+    authMode <- liftIO $ acAuthMode <$> getAppCtx
+    updateJwkCtx
+      (ContextAdvice $ "retrying again after " <> tshow sleepSeconds <> " seconds")
+      authMode
+      httpManager
+      logger
+    liftIO $ sleep $ seconds sleepSeconds
 
 -- | Event triggers live in the user's DB and other events
 --  (cron, one-off and async actions)
@@ -1000,7 +1010,7 @@ runHGEServer setupHook appStateRef initTime startupStatusHook consoleType ekgSto
       shutdownHandler closeSocket =
         LA.link =<< LA.async do
           waitForShutdown appEnvShutdownLatch
-          unLogger logger $ mkGenericLog @Text LevelInfo "server" "gracefully shutting down server"
+          unLogger logger $ mkGenericLog @Text LevelInfo "server" "Gracefully shutting down server"
           closeSocket
 
   finishTime <- liftIO Clock.getCurrentTime
@@ -1008,7 +1018,7 @@ runHGEServer setupHook appStateRef initTime startupStatusHook consoleType ekgSto
   lift
     $ unLoggerTracing logger
     $ mkGenericLog LevelInfo "server"
-    $ StartupTimeInfo "starting API server" apiInitTime
+    $ StartupTimeInfo "Starting API server" apiInitTime
 
   -- Here we block until the shutdown latch 'MVar' is filled, and then
   -- shut down the server. Once this blocking call returns, we'll tidy up
@@ -1096,6 +1106,8 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
 
   case appEnvEventingMode of
     EventingEnabled -> do
+      lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "server" "Starting in eventing enabled mode"
+
       startEventTriggerPollerThread logger appEnvLockedEventsCtx
       startAsyncActionsPollerThread logger appEnvLockedEventsCtx actionSubState
 
@@ -1112,7 +1124,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
 
       startScheduledEventsPollerThread logger appEnvLockedEventsCtx
     EventingDisabled ->
-      lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "server" "starting in eventing disabled mode"
+      lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "server" "Starting in eventing disabled mode"
 
   -- start a background thread to check for updates
   _updateThread <-
@@ -1134,7 +1146,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
 
   -- initialise the websocket connection reaper thread
   _websocketConnectionReaperThread <-
-    C.forkManagedT "websocket connection reaper thread" logger
+    C.forkManagedT "websocketConnectionReaper" logger
       $ liftIO
       $ WS.websocketConnectionReaper getLatestConfigForWSServer getSchemaCache' (_wseServer wsServerEnv)
 
@@ -1157,7 +1169,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
   -- set by the user and update the JWK accordingly. This will help in applying the
   -- updates without restarting HGE.
   _ <-
-    C.forkManagedT "update JWK" logger
+    C.forkManagedT "updateJWK" logger
       $ updateJwkCtxThread (getAppContext appStateRef) appEnvManager logger
 
   -- These cleanup actions are not directly associated with any
@@ -1178,7 +1190,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
     getSchemaCache' = getSchemaCache appStateRef
 
     prepareScheduledEvents (LoggerTracing logger) = do
-      logger $ mkGenericLog @Text LevelInfo "scheduled_triggers" "preparing data"
+      logger $ mkGenericLog @Text LevelInfo "scheduled_triggers" "Unlocking all locked scheduled events on `hdb_scheduled_events` and `hdb_cron_events` tables"
       res <- Retry.retrying Retry.retryPolicyDefault isRetryRequired (return unlockAllLockedScheduledEvents)
       onLeft res (\err -> logger $ mkGenericLog @String LevelError "scheduled_triggers" (show $ qeError err))
 
@@ -1200,7 +1212,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
       forM_ sources $ \backendSourceInfo -> do
         AB.dispatchAnyBackend @BackendEventTrigger backendSourceInfo \(SourceInfo {..} :: SourceInfo b) -> do
           let sourceNameText = sourceNameToText _siName
-          logger $ mkGenericLog LevelInfo "event_triggers" $ "unlocking events of source: " <> sourceNameText
+          logger $ mkGenericLog LevelInfo "event_triggers" $ "Unlocking events for source: " <> sourceNameText
           for_ (HashMap.lookup _siName lockedEvents) $ \sourceLockedEvents -> do
             -- No need to execute unlockEventsTx when events are not present
             for_ (NE.nonEmptySet sourceLockedEvents) $ \nonEmptyLockedEvents -> do
@@ -1209,7 +1221,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
                 Left err ->
                   logger
                     $ mkGenericLog LevelWarn "event_trigger"
-                    $ "Error while unlocking event trigger events of source: "
+                    $ "Error while unlocking event trigger events for source: "
                     <> sourceNameText
                     <> " error:"
                     <> showQErr err
@@ -1217,7 +1229,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
                   logger
                     $ mkGenericLog LevelInfo "event_trigger"
                     $ tshow count
-                    <> " events of source "
+                    <> " events for source "
                     <> sourceNameText
                     <> " were successfully unlocked"
 
@@ -1297,7 +1309,7 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
             (createFetchedEventsStatsLogger logger)
             (closeFetchedEventsStatsLogger logger)
 
-        lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "event_triggers" "starting workers"
+        lift $ unLoggerTracing logger $ mkGenericLog @Text LevelInfo "event_triggers" "Starting workers"
         void
           $ C.forkManagedTWithGracefulShutdown
             "processEventQueue"
@@ -1353,8 +1365,6 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
 
     startScheduledEventsPollerThread logger lockedEventsCtx = do
       AppEnv {..} <- lift askAppEnv
-      -- prepare scheduled triggers
-      lift $ prepareScheduledEvents logger
 
       -- Create logger for logging the statistics of scheduled events fetched
       scheduledEventsStatsLogger <-
@@ -1363,7 +1373,6 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
           (closeFetchedScheduledEventsStatsLogger logger)
 
       -- start a background thread to deliver the scheduled events
-      -- _scheduledEventsThread <- do
       let scheduledEventsGracefulShutdownAction =
             ( liftWithStateless \lowerIO ->
                 ( waitForProcessingAction
@@ -1380,15 +1389,22 @@ mkHGEServer setupHook appStateRef consoleType ekgStore = do
           "processScheduledTriggers"
           logger
           (C.ThreadShutdown scheduledEventsGracefulShutdownAction)
-        $ processScheduledTriggers
-          (acEnvironment <$> getAppContext appStateRef)
-          logger
-          scheduledEventsStatsLogger
-          appEnvManager
-          (pmScheduledTriggerMetrics appEnvPrometheusMetrics)
-          (getSchemaCache appStateRef)
-          lockedEventsCtx
-          appEnvTriggersErrorLogLevelStatus
+        $ do
+          -- prepare scheduled triggers
+          -- this can take a while if `ndb_scheduled_events` is big
+          -- so we do this off the main thread
+          prepareScheduledEvents logger
+
+          -- start processing loop
+          processScheduledTriggers
+            (acEnvironment <$> getAppContext appStateRef)
+            logger
+            scheduledEventsStatsLogger
+            appEnvManager
+            (pmScheduledTriggerMetrics appEnvPrometheusMetrics)
+            (getSchemaCache appStateRef)
+            lockedEventsCtx
+            appEnvTriggersErrorLogLevelStatus
 
 runInSeparateTx ::
   PG.TxE QErr a ->
@@ -1508,7 +1524,8 @@ mkPgSourceResolver pgLogger env sourceName config = runExceptT do
   let context = J.object [("source" J..= sourceName)]
   pgPool <- liftIO $ Q.initPGPool connInfo context connParams pgLogger
   let pgExecCtx = mkPGExecCtx isoLevel pgPool NeverResizePool
-  pure $ PGSourceConfig pgExecCtx connInfo Nothing mempty (pccExtensionsSchema config) mempty ConnTemplate_NotApplicable
+  connInfoWithFinalizer <- liftIO $ mkConnInfoWithFinalizer connInfo (pure ())
+  pure $ PGSourceConfig pgExecCtx connInfoWithFinalizer Nothing mempty (pccExtensionsSchema config) mempty ConnTemplate_NotApplicable
 
 mkMSSQLSourceResolver :: SourceResolver 'MSSQL
 mkMSSQLSourceResolver env _name (MSSQLConnConfiguration connInfo _) = runExceptT do

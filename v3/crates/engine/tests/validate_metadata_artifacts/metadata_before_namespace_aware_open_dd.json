@@ -6,7 +6,7 @@
       "name": "db",
       "url": {
         "singleUrl": {
-          "value": "http://postgres_connector:8100"
+          "value": "http://postgres_connector:8080"
         }
       },
       "headers": {},
@@ -181,9 +181,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "ArticleByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -196,9 +194,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "AuthorByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -367,7 +363,11 @@
             "query": {
               "aggregates": {},
               "variables": {},
-              "explain": {}
+              "explain": {},
+              "nested_fields": {
+                "filter_by": {},
+                "order_by": {}
+              }
             },
             "relationships": {
               "relation_comparisons": {},
@@ -375,7 +375,7 @@
             },
             "mutation": {}
           },
-          "version": "0.1.0"
+          "version": "0.1.3"
         }
       }
     }
@@ -456,9 +456,7 @@
           "type": "CustomInt!"
         }
       ],
-      "globalIdFields": [
-        "article_id"
-      ],
+      "globalIdFields": ["article_id"],
       "graphql": {
         "typeName": "Article"
       },
@@ -575,9 +573,7 @@
         "selectUniques": [
           {
             "queryRootField": "AuthorByID",
-            "uniqueIdentifier": [
-              "author_id"
-            ]
+            "uniqueIdentifier": ["author_id"]
           }
         ],
         "selectMany": {
@@ -642,9 +638,7 @@
         "selectUniques": [
           {
             "queryRootField": "ArticleByID",
-            "uniqueIdentifier": [
-              "article_id"
-            ]
+            "uniqueIdentifier": ["article_id"]
           }
         ],
         "selectMany": {
@@ -674,9 +668,7 @@
         "selectUniques": [
           {
             "queryRootField": "ArticlesByAuthorByID",
-            "uniqueIdentifier": [
-              "article_id"
-            ]
+            "uniqueIdentifier": ["article_id"]
           }
         ],
         "selectMany": {
@@ -782,10 +774,7 @@
         {
           "role": "admin",
           "output": {
-            "allowedFields": [
-              "author_id",
-              "first_name"
-            ]
+            "allowedFields": ["author_id", "first_name"]
           }
         }
       ]
@@ -886,29 +875,19 @@
         {
           "role": "admin",
           "output": {
-            "allowedFields": [
-              "article_id",
-              "title",
-              "author_id"
-            ]
+            "allowedFields": ["article_id", "title", "author_id"]
           }
         },
         {
           "role": "user_1",
           "output": {
-            "allowedFields": [
-              "article_id",
-              "author_id"
-            ]
+            "allowedFields": ["article_id", "author_id"]
           }
         },
         {
           "role": "user_2",
           "output": {
-            "allowedFields": [
-              "article_id",
-              "title"
-            ]
+            "allowedFields": ["article_id", "title"]
           }
         }
       ]
@@ -997,10 +976,7 @@
         {
           "role": "admin",
           "output": {
-            "allowedFields": [
-              "id",
-              "name"
-            ]
+            "allowedFields": ["id", "name"]
           }
         }
       ]
@@ -1030,15 +1006,11 @@
         "selectUniques": [
           {
             "queryRootField": "TestModelByID",
-            "uniqueIdentifier": [
-              "id"
-            ]
+            "uniqueIdentifier": ["id"]
           },
           {
             "queryRootField": "TestModelByName",
-            "uniqueIdentifier": [
-              "name"
-            ]
+            "uniqueIdentifier": ["name"]
           }
         ]
       }
@@ -1058,7 +1030,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "author",
+      "sourceType": "author",
       "name": "Articles",
       "target": {
         "model": {
@@ -1090,7 +1062,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "article",
+      "sourceType": "article",
       "name": "Author",
       "target": {
         "model": {
@@ -1195,21 +1167,13 @@
         {
           "role": "admin",
           "output": {
-            "allowedFields": [
-              "article_id",
-              "title",
-              "author_id"
-            ]
+            "allowedFields": ["article_id", "title", "author_id"]
           }
         },
         {
           "role": "user",
           "output": {
-            "allowedFields": [
-              "article_id",
-              "title",
-              "author_id"
-            ]
+            "allowedFields": ["article_id", "title", "author_id"]
           }
         }
       ]

@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
 -- | Types and classes related to configuration when the server is initialised
@@ -89,6 +90,7 @@ import Database.PG.Query qualified as Query
 import Hasura.Backends.Postgres.Connection.MonadTx qualified as MonadTx
 import Hasura.GraphQL.Execute.Subscription.Options qualified as Subscription.Options
 import Hasura.Logging qualified as Logging
+import Hasura.NativeQuery.Validation qualified as NativeQuery.Validation
 import Hasura.Prelude
 import Hasura.RQL.Types.Common qualified as Common
 import Hasura.RQL.Types.Metadata (MetadataDefaults)
@@ -126,6 +128,7 @@ data HGEOptionsRaw impl = HGEOptionsRaw
     _horMetadataDbUrl :: Maybe String,
     _horCommand :: HGECommand impl
   }
+  deriving stock (Show)
 
 horDatabaseUrl :: Lens' (HGEOptionsRaw impl) (PostgresConnInfo (Maybe PostgresConnInfoRaw))
 horDatabaseUrl = Lens.lens _horDatabaseUrl $ \hdu a -> hdu {_horDatabaseUrl = a}
@@ -330,8 +333,12 @@ data ServeOptionsRaw impl = ServeOptionsRaw
     rsoPersistedQueries :: Maybe Server.Types.PersistedQueriesState,
     rsoPersistedQueriesTtl :: Maybe Int,
     rsoRemoteSchemaResponsePriority :: Maybe Server.Types.RemoteSchemaResponsePriority,
-    rsoHeaderPrecedence :: Maybe Server.Types.HeaderPrecedence
+    rsoHeaderPrecedence :: Maybe Server.Types.HeaderPrecedence,
+    rsoTraceQueryStatus :: Maybe Server.Types.TraceQueryStatus,
+    rsoDisableNativeQueryValidation :: NativeQuery.Validation.DisableNativeQueryValidation
   }
+
+deriving stock instance (Show (Logging.EngineLogType impl)) => Show (ServeOptionsRaw impl)
 
 -- | Whether or not to serve Console assets.
 data ConsoleStatus = ConsoleEnabled | ConsoleDisabled
@@ -512,6 +519,7 @@ data AuthHookRaw = AuthHookRaw
     ahrType :: Maybe Auth.AuthHookType,
     ahrSendRequestBody :: Maybe Bool
   }
+  deriving stock (Show)
 
 -- | Sleep time interval for recurring activities such as (@'asyncActionsProcessor')
 --   Presently 'msToOptionalInterval' interprets `0` as Skip.
@@ -638,7 +646,9 @@ data ServeOptions impl = ServeOptions
     soPersistedQueries :: Server.Types.PersistedQueriesState,
     soPersistedQueriesTtl :: Int,
     soRemoteSchemaResponsePriority :: Server.Types.RemoteSchemaResponsePriority,
-    soHeaderPrecedence :: Server.Types.HeaderPrecedence
+    soHeaderPrecedence :: Server.Types.HeaderPrecedence,
+    soTraceQueryStatus :: Server.Types.TraceQueryStatus,
+    soDisableNativeQueryValidation :: NativeQuery.Validation.DisableNativeQueryValidation
   }
 
 -- | 'ResponseInternalErrorsConfig' represents the encoding of the

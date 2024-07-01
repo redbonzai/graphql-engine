@@ -93,7 +93,7 @@ impl<'a> Parser<'a> {
         self.parse_optional_nonempty_delimited_list(
             lexer::Punctuation::ParenL,
             lexer::Punctuation::ParenR,
-            |s| s.parse_variable_definition(),
+            Parser::parse_variable_definition,
         )
     }
 
@@ -247,7 +247,7 @@ impl<'a> Parser<'a> {
     pub fn parse_executable_document(&mut self) -> super::Result<ExecutableDocument> {
         let mut items = vec![];
         while self.peek().is_some() {
-            items.push(self.parse_executable_definition()?)
+            items.push(self.parse_executable_definition()?);
         }
         Ok(ExecutableDocument { items })
     }

@@ -1,4 +1,3 @@
-use derive_more::Display;
 use indexmap::IndexSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,9 +20,11 @@ use crate::{
     Debug,
     Eq,
     PartialEq,
+    PartialOrd,
+    Ord,
     JsonSchema,
     Hash,
-    Display,
+    derive_more::Display,
     opendds_derive::OpenDd,
 )]
 pub struct Role(pub String);
@@ -47,13 +48,49 @@ pub struct ArgumentPreset {
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
 #[serde(tag = "version", content = "definition")]
 #[serde(rename_all = "camelCase")]
-#[opendd(as_versioned_with_definition, json_schema(title = "TypePermissions"))]
+#[opendd(
+    as_versioned_with_definition,
+    json_schema(title = "TypePermissions", example = "TypePermissions::example")
+)]
 /// Definition of permissions for an OpenDD type.
 pub enum TypePermissions {
     V1(TypePermissionsV1),
 }
 
 impl TypePermissions {
+    fn example() -> serde_json::Value {
+        serde_json::json!(
+            {
+                "kind": "TypePermissions",
+                "version": "v1",
+                "definition": {
+                    "typeName": "article",
+                    "permissions": [
+                        {
+                            "role": "admin",
+                            "output": {
+                                "allowedFields": [
+                                    "article_id",
+                                    "author_id",
+                                    "title"
+                                ]
+                            }
+                        },
+                        {
+                            "role": "user",
+                            "output": {
+                                "allowedFields": [
+                                    "article_id",
+                                    "author_id"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        )
+    }
+
     pub fn upgrade(self) -> TypePermissionsV1 {
         match self {
             TypePermissions::V1(v1) => v1,
@@ -63,44 +100,13 @@ impl TypePermissions {
 
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
 #[serde(rename_all = "camelCase")]
-#[opendd(json_schema(title = "TypePermissionsV1", example = "TypePermissionsV1::example"))]
+#[opendd(json_schema(title = "TypePermissionsV1"))]
 /// Definition of permissions for an OpenDD type.
 pub struct TypePermissionsV1 {
     /// The name of the type for which permissions are being defined. Must be an object type.
     pub type_name: CustomTypeName,
     /// A list of type permissions, one for each role.
     pub permissions: Vec<TypePermission>,
-}
-
-impl TypePermissionsV1 {
-    fn example() -> serde_json::Value {
-        serde_json::json!(
-            {
-                "typeName": "article",
-                "permissions": [
-                    {
-                        "role": "admin",
-                        "output": {
-                            "allowedFields": [
-                                "article_id",
-                                "author_id",
-                                "title"
-                            ]
-                        }
-                    },
-                    {
-                        "role": "user",
-                        "output": {
-                            "allowedFields": [
-                                "article_id",
-                                "author_id"
-                            ]
-                        }
-                    }
-                ]
-            }
-        )
-    }
 }
 
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
@@ -113,6 +119,9 @@ pub struct TypePermission {
     /// Permissions for this role when this type is used in an output context.
     /// If null, this type is inaccessible for this role in an output context.
     pub output: Option<TypeOutputPermission>,
+    /// Permissions for this role when this type is used in an input context.
+    /// If null, this type is accessible for this role in an input context.
+    pub input: Option<TypeInputPermission>,
 }
 
 impl TypePermission {
@@ -124,6 +133,16 @@ impl TypePermission {
                     "allowedFields": [
                         "article_id",
                         "author_id"
+                    ]
+                },
+                "input": {
+                    "fieldPresets": [
+                        {
+                            "field": "author_id",
+                            "value": {
+                                "sessionVariable": "x-hasura-user-id"
+                            }
+                        }
                     ]
                 }
             }
@@ -143,16 +162,74 @@ pub struct TypeOutputPermission {
     // pub field_argument_presets: HashMap<FieldName, Vec<ParameterPreset>>,
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+#[opendd(json_schema(title = "TypeInputPermission"))]
+/// Permissions for a type for a particular role when used in an input context.
+pub struct TypeInputPermission {
+    /// Preset values for fields of the type
+    #[opendd(default, json_schema(default_exp = "serde_json::json!([])"))]
+    pub field_presets: Vec<FieldPreset>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
+#[serde(rename_all = "camelCase")]
+/// Preset value for a field
+pub struct FieldPreset {
+    /// Field name for preset
+    pub field: FieldName,
+    /// Value for preset
+    pub value: ValueExpression,
+}
+
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
 #[serde(tag = "version", content = "definition")]
 #[serde(rename_all = "camelCase")]
-#[opendd(as_versioned_with_definition, json_schema(title = "ModelPermissions"))]
+#[opendd(
+    as_versioned_with_definition,
+    json_schema(title = "ModelPermissions", example = "ModelPermissions::example")
+)]
 /// Definition of permissions for an OpenDD model.
 pub enum ModelPermissions {
     V1(ModelPermissionsV1),
 }
 
 impl ModelPermissions {
+    fn example() -> serde_json::Value {
+        serde_json::json!(
+            {
+                "kind": "ModelPermissions",
+                "version": "v1",
+                "definition": {
+                    "modelName": "Articles",
+                    "permissions": [
+                        {
+                            "role": "admin",
+                            "select": {
+                                "filter": null
+                            }
+                        },
+                        {
+                            "role": "user",
+                            "select": {
+                                "filter": {
+                                    "fieldComparison": {
+                                        "field": "author_id",
+                                        "operator": "_eq",
+                                        "value": {
+                                            "sessionVariable": "x-hasura-user-id"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        )
+    }
+
     pub fn upgrade(self) -> ModelPermissionsV1 {
         match self {
             ModelPermissions::V1(v1) => v1,
@@ -162,45 +239,13 @@ impl ModelPermissions {
 
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
 #[serde(rename_all = "camelCase")]
-#[opendd(json_schema(title = "ModelPermissionsV1", example = "ModelPermissionsV1::example"))]
+#[opendd(json_schema(title = "ModelPermissionsV1"))]
 /// Definition of permissions for an OpenDD model.
 pub struct ModelPermissionsV1 {
     /// The name of the model for which permissions are being defined.
     pub model_name: ModelName,
     /// A list of model permissions, one for each role.
     pub permissions: Vec<ModelPermission>,
-}
-
-impl ModelPermissionsV1 {
-    fn example() -> serde_json::Value {
-        serde_json::json!(
-            {
-                "modelName": "Articles",
-                "permissions": [
-                    {
-                        "role": "admin",
-                        "select": {
-                            "filter": null
-                        }
-                    },
-                    {
-                        "role": "user",
-                        "select": {
-                            "filter": {
-                                "fieldComparison": {
-                                    "field": "author_id",
-                                    "operator": "_eq",
-                                    "value": {
-                                        "sessionVariable": "x-hasura-user-id"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                ]
-            }
-        )
-    }
 }
 
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
@@ -298,7 +343,7 @@ impl traits::OpenDd for NullableModelPredicate {
 impl NullableModelPredicate {
     pub fn as_option_ref(&self) -> Option<&ModelPredicate> {
         match self {
-            NullableModelPredicate::Null(_) => None,
+            NullableModelPredicate::Null(()) => None,
             NullableModelPredicate::NotNull(p) => Some(p),
         }
     }
@@ -340,7 +385,7 @@ impl CommandPermission {
 #[serde(rename_all = "camelCase")]
 #[opendd(
     as_versioned_with_definition,
-    json_schema(title = "CommandPermissions")
+    json_schema(title = "CommandPermissions", example = "CommandPermissions::example")
 )]
 /// Definition of permissions for an OpenDD command.
 pub enum CommandPermissions {
@@ -348,6 +393,28 @@ pub enum CommandPermissions {
 }
 
 impl CommandPermissions {
+    fn example() -> serde_json::Value {
+        serde_json::json!(
+            {
+                "kind": "CommandPermissions",
+                "version": "v1",
+                "definition": {
+                    "commandName": "get_article_by_id",
+                    "permissions": [
+                        {
+                            "role": "admin",
+                            "allowExecution": true
+                        },
+                        {
+                            "role": "user",
+                            "allowExecution": true
+                        }
+                    ]
+                }
+            }
+        )
+    }
+
     pub fn upgrade(self) -> CommandPermissionsV1 {
         match self {
             CommandPermissions::V1(v1) => v1,
@@ -357,36 +424,13 @@ impl CommandPermissions {
 
 #[derive(Serialize, Clone, Debug, Eq, PartialEq, opendds_derive::OpenDd)]
 #[serde(rename_all = "camelCase")]
-#[opendd(json_schema(
-    title = "CommandPermissionsV1",
-    example = "CommandPermissionsV1::example"
-))]
+#[opendd(json_schema(title = "CommandPermissionsV1"))]
 /// Definition of permissions for an OpenDD command.
 pub struct CommandPermissionsV1 {
     /// The name of the command for which permissions are being defined.
     pub command_name: CommandName,
     /// A list of command permissions, one for each role.
     pub permissions: Vec<CommandPermission>,
-}
-
-impl CommandPermissionsV1 {
-    fn example() -> serde_json::Value {
-        serde_json::json!(
-            {
-                "commandName": "get_article_by_id",
-                "permissions": [
-                    {
-                        "role": "admin",
-                        "allowExecution": true
-                    },
-                    {
-                        "role": "user",
-                        "allowExecution": true
-                    }
-                ]
-            }
-        )
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
@@ -402,6 +446,16 @@ pub struct FieldComparisonPredicate {
     /// The value expression to compare against.
     // When we support custom operators, we can make this optional
     pub value: ValueExpression,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+#[schemars(title = "FieldIsNullPredicate")]
+/// Predicate to check if the given field is null.
+pub struct FieldIsNullPredicate {
+    /// The name of the field that should be checked for a null value.
+    pub field: FieldName,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, JsonSchema)]
@@ -428,9 +482,7 @@ pub struct RelationshipPredicate {
 pub enum ModelPredicate {
     /// Filters objects based on a field value.
     FieldComparison(FieldComparisonPredicate),
-    FieldIsNull {
-        field: FieldName,
-    },
+    FieldIsNull(FieldIsNullPredicate),
     // TODO: Remote relationships are disallowed for now
     /// Filters objects based on the relationship of a model.
     Relationship(RelationshipPredicate),
@@ -470,12 +522,15 @@ impl ModelPredicate {
 )]
 #[serde(rename_all = "camelCase")]
 #[schemars(title = "ValueExpression")]
-/// An expression which evaluates to a value that can be used in permissions.
+/// An expression which evaluates to a value that can be used in permissions and
+/// various presets.
 pub enum ValueExpression {
     #[schemars(title = "Literal")]
     Literal(JsonValue),
     #[schemars(title = "SessionVariable")]
     SessionVariable(SessionVariable),
+    #[schemars(title = "BooleanExpression")]
+    BooleanExpression(Box<ModelPredicate>),
     // TODO: Uncomment the below, once commands are supported.
     // Command {
     //     name: CommandName,

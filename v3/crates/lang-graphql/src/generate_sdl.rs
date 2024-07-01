@@ -40,10 +40,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    ast::common as ast,
+    ast::{common as ast, value::ConstValue},
     schema::{
-        DeprecationStatus, Directive, Enum, Field, InputObject, Interface, Namespaced, Object,
-        Scalar, Schema, SchemaContext, TypeInfo, Union,
+        DeprecationStatus, Directive, Enum, Field, InputField, InputObject, Interface, Namespaced,
+        NamespacedGetter, Object, Scalar, Schema, SchemaContext, TypeInfo, Union,
     },
 };
 
@@ -59,8 +59,11 @@ impl<S: SchemaContext> Object<S> {
     /// }
     /// ```
     /// Please note that, if there are no fields in the object type, it will return `None`.
-    fn generate_sdl(&self, namespace: &S::Namespace) -> Option<String> {
-        let fields_sdl = generate_fields_sdl(&self.fields, namespace);
+    fn generate_sdl<NSGet: NamespacedGetter<S>>(
+        &self,
+        namespaced_getter: &NSGet,
+    ) -> Option<String> {
+        let fields_sdl = generate_fields_sdl(&self.fields, namespaced_getter);
         if fields_sdl.is_empty() {
             None
         } else {
@@ -87,18 +90,23 @@ impl<S: SchemaContext> InputObject<S> {
     /// }
     /// ```
     /// Please note that, if there are no fields in the input object type, it will return `None`.
-    fn generate_sdl(&self, namespace: &S::Namespace) -> Option<String> {
+    fn generate_sdl<NSGet: NamespacedGetter<S>>(
+        &self,
+        namespaced_getter: &NSGet,
+    ) -> Option<String> {
         let fields_sdl = self
             .fields
             .iter()
             .filter_map(|(field_name, field)| {
-                field.get(namespace).map(|(data, _)| {
+                namespaced_getter.get(field).map(|(data, _)| {
                     with_description(
                         &data.description,
-                        format_field_with_type(
+                        format_field_with_type::<S, NSGet>(
                             field_name,
+                            &BTreeMap::new(),
                             &data.field_type,
-                            Some(&data.deprecation_status),
+                            &data.deprecation_status,
+                            namespaced_getter,
                         ),
                     )
                 })
@@ -150,12 +158,15 @@ impl<S: SchemaContext> Enum<S> {
     /// }
     /// ```
     /// Please note that, if there are no values in the enum type, it will return `None`.
-    fn generate_sdl(&self, namespace: &S::Namespace) -> Option<String> {
+    fn generate_sdl<NSGet: NamespacedGetter<S>>(
+        &self,
+        namespaced_getter: &NSGet,
+    ) -> Option<String> {
         let fields_sdl = self
             .values
             .values()
             .filter_map(|enum_val| {
-                enum_val.get(namespace).map(|(data, _)| {
+                namespaced_getter.get(enum_val).map(|(data, _)| {
                     with_description(
                         &data.description,
                         format!(
@@ -190,12 +201,15 @@ impl<S: SchemaContext> Union<S> {
     /// union SearchResult = Human | Droid | Starship
     /// ```
     /// Please note that, if there are no members in the union type, it will return `None`.
-    fn generate_sdl(&self, namespace: &S::Namespace) -> Option<String> {
+    fn generate_sdl<NSGet: NamespacedGetter<S>>(
+        &self,
+        namespaced_getter: &NSGet,
+    ) -> Option<String> {
         let members_sdl = &self
             .members
             .iter()
             .filter_map(|(union_member, member_value)| {
-                if member_value.get(namespace).is_some() {
+                if namespaced_getter.get(member_value).is_some() {
                     Some(union_member.to_string())
                 } else {
                     None
@@ -227,8 +241,11 @@ impl<S: SchemaContext> Interface<S> {
     /// }
     /// ```
     /// Please note that, if there are no fields in the interface type, it will return `None`.
-    fn generate_sdl(&self, namespace: &S::Namespace) -> Option<String> {
-        let fields_sdl = generate_fields_sdl(&self.fields, namespace);
+    fn generate_sdl<NSGet: NamespacedGetter<S>>(
+        &self,
+        namespaced_getter: &NSGet,
+    ) -> Option<String> {
+        let fields_sdl = generate_fields_sdl(&self.fields, namespaced_getter);
         if fields_sdl.is_empty() {
             None
         } else {
@@ -246,27 +263,30 @@ impl<S: SchemaContext> Interface<S> {
 }
 
 impl<S: SchemaContext> TypeInfo<S> {
-    fn generate_sdl(&self, namespace: &S::Namespace) -> Option<String> {
+    fn generate_sdl<NSGet: NamespacedGetter<S>>(
+        &self,
+        namespaced_getter: &NSGet,
+    ) -> Option<String> {
         match self {
             TypeInfo::Scalar(scalar) => Some(scalar.generate_sdl()),
-            TypeInfo::Enum(enm) => enm.generate_sdl(namespace),
-            TypeInfo::Object(object) => object.generate_sdl(namespace),
-            TypeInfo::Interface(interface) => interface.generate_sdl(namespace),
-            TypeInfo::Union(union) => union.generate_sdl(namespace),
-            TypeInfo::InputObject(input_object) => input_object.generate_sdl(namespace),
+            TypeInfo::Enum(enm) => enm.generate_sdl(namespaced_getter),
+            TypeInfo::Object(object) => object.generate_sdl(namespaced_getter),
+            TypeInfo::Interface(interface) => interface.generate_sdl(namespaced_getter),
+            TypeInfo::Union(union) => union.generate_sdl(namespaced_getter),
+            TypeInfo::InputObject(input_object) => input_object.generate_sdl(namespaced_getter),
         }
     }
 }
 
 impl<S: SchemaContext> Schema<S> {
-    pub fn generate_sdl(&self, namespace: &S::Namespace) -> String {
-        let schema_sdl = get_schema_sdl(self, namespace);
+    pub fn generate_sdl<NSGet: NamespacedGetter<S>>(&self, namespaced_getter: &NSGet) -> String {
+        let schema_sdl = get_schema_sdl(self, namespaced_getter);
         self.types
             .iter()
             .fold(schema_sdl, |mut acc, (type_name, type_info)| {
                 // Ignore schema related types
                 if !type_name.as_str().starts_with("__") {
-                    if let Some(type_sdl) = type_info.generate_sdl(namespace) {
+                    if let Some(type_sdl) = type_info.generate_sdl(namespaced_getter) {
                         acc.push_str("\n\n");
                         acc.push_str(&type_sdl);
                     }
@@ -291,20 +311,21 @@ impl<S: SchemaContext> Schema<S> {
 /// mutation field in the mutation type, it will not include mutation in the schema.
 ///
 /// If there is no subscription type, it will not include subscription in the schema.
-fn get_schema_sdl<S: SchemaContext>(schema: &Schema<S>, namespace: &S::Namespace) -> String {
+fn get_schema_sdl<S: SchemaContext, NSGet: NamespacedGetter<S>>(
+    schema: &Schema<S>,
+    namespaced_getter: &NSGet,
+) -> String {
     let query_field = format!("query: {} ", &schema.query_type);
     let mutation_field = schema.mutation_type.as_ref().and_then(|t| {
         schema.types.get(t).and_then(|type_info| match type_info {
             TypeInfo::Object(object) => {
                 // If there is only __typename in the mutation fields, ignore the mutation altogether
-                if object
-                    .fields
-                    .iter()
-                    .all(|(k, v)| (k.as_str() == "__typename") || (v.get(namespace).is_none()))
-                {
+                if object.fields.iter().all(|(k, v)| {
+                    (k.as_str() == "__typename") || (namespaced_getter.get(v).is_none())
+                }) {
                     None
                 } else {
-                    Some(format!("mutation: {} ", t))
+                    Some(format!("mutation: {t} "))
                 }
             }
             _ => None,
@@ -313,7 +334,7 @@ fn get_schema_sdl<S: SchemaContext>(schema: &Schema<S>, namespace: &S::Namespace
     let subscription_field = schema
         .subscription_type
         .as_ref()
-        .map(|t| format!("subscription: {} ", t));
+        .map(|t| format!("subscription: {t} "));
     format!(
         "schema {}",
         in_curly_braces(
@@ -329,7 +350,7 @@ fn get_schema_sdl<S: SchemaContext>(schema: &Schema<S>, namespace: &S::Namespace
 fn generate_description_sdl(description: &Option<String>) -> String {
     description
         .as_ref()
-        .map(|d| format!("\"\"\"{}\"\"\"", d))
+        .map(|d| format!("\"\"\"{d}\"\"\""))
         .unwrap_or_default()
 }
 
@@ -356,7 +377,7 @@ fn generate_directives_sdl(
                 if args.is_empty() {
                     String::default()
                 } else {
-                    format!("({})", args)
+                    format!("({args})")
                 }
             )
         })
@@ -366,30 +387,32 @@ fn generate_directives_sdl(
         Some(DeprecationStatus::Deprecated { reason }) => {
             let reason_arg = reason
                 .as_ref()
-                .map(|r| format!("(reason: {})", r))
+                .map(|r| format!("(reason: {r})"))
                 .unwrap_or_default();
-            format!("@deprecated{} {}", reason_arg, other_directives)
+            format!("@deprecated{reason_arg} {other_directives}")
         }
         _ => other_directives,
     }
 }
 
 /// Generate SDL for fields. This will not include schema related fields (fields starting with __).
-fn generate_fields_sdl<S: SchemaContext>(
+fn generate_fields_sdl<S: SchemaContext, NSGet: NamespacedGetter<S>>(
     fields: &BTreeMap<ast::Name, Namespaced<S, Field<S>>>,
-    namespace: &S::Namespace,
+    namespaced_getter: &NSGet,
 ) -> Vec<String> {
     let mut fields_sdl = Vec::new();
     for (field_name, field) in fields {
         // Ignore schema related fields
         if !field_name.as_str().starts_with("__") {
-            if let Some((data, _)) = field.get(namespace) {
+            if let Some((data, _)) = namespaced_getter.get(field) {
                 fields_sdl.push(with_description(
                     &data.description,
                     format_field_with_type(
                         field_name,
+                        &data.arguments,
                         &data.field_type,
-                        Some(&data.deprecation_status),
+                        &data.deprecation_status,
+                        namespaced_getter,
                     ),
                 ));
             }
@@ -398,20 +421,113 @@ fn generate_fields_sdl<S: SchemaContext>(
     fields_sdl
 }
 
-fn format_field_with_type(
+/// Format an input field as SDL, including default values if present.
+///
+/// Syntax:
+///
+///    <field_name>: <field_type> = <default_value>
+///
+fn format_input_field_with_type(
     field_name: &ast::Name,
     field_type: &ast::TypeContainer<ast::TypeName>,
-    deprecation_status: Option<&DeprecationStatus>,
+    deprecation_status: &DeprecationStatus,
+    default_value: Option<&ConstValue>,
 ) -> String {
-    let field_sdl = format!("{}: {}", field_name, field_type);
-    match deprecation_status {
-        Some(deprecation_status) => format!(
+    let field_sdl = match default_value {
+        None => format!("{field_name}: {field_type}"),
+        Some(default_value) => {
+            let default_value_sdl = default_value.to_json().to_string();
+            let mut default_value_lines = default_value_sdl.lines();
+            let multiple_lines = {
+                default_value_lines.next();
+                default_value_lines.next().is_some()
+            };
+            if multiple_lines {
+                format!(
+                    "{}: {}\n  = {}",
+                    field_name,
+                    field_type,
+                    with_indent(default_value_sdl.as_str())
+                )
+            } else {
+                format!("{field_name}: {field_type} = {default_value_sdl}")
+            }
+        }
+    };
+    if deprecation_status == &DeprecationStatus::NotDeprecated {
+        field_sdl
+    } else {
+        format!(
             "{} {}",
             field_sdl,
             generate_directives_sdl(&[], Some(deprecation_status))
-        ),
-        _ => field_sdl,
+        )
     }
+}
+
+/// Format an (output) field as SDL, including field arguments if present.
+///
+/// Syntax:
+///
+///    <field_name>(<generate_arguments_sdl(field_arguments)>): <field_type>
+///
+fn format_field_with_type<S: SchemaContext, NSGet: NamespacedGetter<S>>(
+    field_name: &ast::Name,
+    field_arguments: &BTreeMap<ast::Name, Namespaced<S, InputField<S>>>,
+    field_type: &ast::TypeContainer<ast::TypeName>,
+    deprecation_status: &DeprecationStatus,
+    namespaced_getter: &NSGet,
+) -> String {
+    let field_sdl = if field_arguments.is_empty() {
+        format!("{field_name}: {field_type}")
+    } else {
+        let arguments_sdl = generate_arguments_sdl(field_arguments, namespaced_getter);
+        let mut arguments_lines = arguments_sdl.lines();
+        let multiple_lines = {
+            arguments_lines.next();
+            arguments_lines.next().is_some()
+        };
+
+        if multiple_lines {
+            format!(
+                "{}(\n{}\n  ): {}",
+                field_name,
+                with_indent(arguments_sdl.as_str()),
+                field_type
+            )
+        } else {
+            format!("{field_name}({arguments_sdl}): {field_type}")
+        }
+    };
+    if deprecation_status == &DeprecationStatus::NotDeprecated {
+        field_sdl
+    } else {
+        format!(
+            "{} {}",
+            field_sdl,
+            generate_directives_sdl(&[], Some(deprecation_status))
+        )
+    }
+}
+
+fn generate_arguments_sdl<S: SchemaContext, NSGet: NamespacedGetter<S>>(
+    field_arguments: &BTreeMap<ast::Name, Namespaced<S, InputField<S>>>,
+    namespaced_getter: &NSGet,
+) -> String {
+    field_arguments
+        .iter()
+        .filter_map(|(field_name, namespaced)| {
+            namespaced_getter.get(namespaced).map(|(input_field, _)| {
+                format_input_field_with_type(
+                    field_name,
+                    &input_field.field_type,
+                    &input_field.deprecation_status,
+                    input_field.default_value.as_ref(),
+                )
+            })
+        })
+        .collect::<Vec<String>>()
+        .join(",\n")
 }
 
 fn with_description(description: &Option<String>, sdl: String) -> String {
@@ -427,15 +543,15 @@ fn in_curly_braces(strings: Vec<String>) -> String {
         "{{\n{}\n}}",
         strings
             .into_iter()
-            .map(with_indent)
+            .map(|s| with_indent(&s))
             .collect::<Vec<String>>()
             .join("\n")
     )
 }
 
-fn with_indent(sdl: String) -> String {
+fn with_indent(sdl: &str) -> String {
     sdl.lines()
-        .map(|l| format!("  {}", l))
+        .map(|l| format!("  {l}"))
         .collect::<Vec<String>>()
         .join("\n")
 }

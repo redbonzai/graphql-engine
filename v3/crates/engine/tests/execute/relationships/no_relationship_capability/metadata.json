@@ -11,7 +11,7 @@
             "name": "db",
             "url": {
               "singleUrl": {
-                "value": "http://postgres_connector:8100"
+                "value": "http://postgres_connector:8080"
               }
             },
             "headers": {},
@@ -176,31 +176,27 @@
                 },
                 "collections": [
                   {
-                    "name": "articles",
+                    "name": "article",
                     "description": "A collection of articles",
                     "arguments": {},
                     "type": "article",
                     "deletable": false,
                     "uniqueness_constraints": {
                       "ArticleByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
                   },
                   {
-                    "name": "authors",
+                    "name": "author",
                     "description": "A collection of authors",
                     "arguments": {},
                     "type": "author",
                     "deletable": false,
                     "uniqueness_constraints": {
                       "AuthorByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -369,7 +365,11 @@
                   "query": {
                     "aggregates": {},
                     "variables": {},
-                    "explain": {}
+                    "explain": {},
+                    "nested_fields": {
+                      "filter_by": {},
+                      "order_by": {}
+                    }
                   },
                   "relationships": {
                     "relation_comparisons": {},
@@ -377,7 +377,7 @@
                   },
                   "mutation": {}
                 },
-                "version": "0.1.0" 
+                "version": "0.1.3"
               }
             }
           }
@@ -458,7 +458,7 @@
             "objectType": "author",
             "source": {
               "dataConnectorName": "db",
-              "collection": "authors"
+              "collection": "author"
             },
             "orderableFields": [
               {
@@ -491,11 +491,7 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name",
-                    "last_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name", "last_name"]
                 }
               }
             ]
@@ -535,9 +531,7 @@
                 "type": "Int!"
               }
             ],
-            "globalIdFields": [
-              "article_id"
-            ],
+            "globalIdFields": ["article_id"],
             "graphql": {
               "typeName": "Article"
             },
@@ -575,15 +569,13 @@
             "globalIdSource": true,
             "source": {
               "dataConnectorName": "db",
-              "collection": "articles"
+              "collection": "article"
             },
             "graphql": {
               "selectUniques": [
                 {
                   "queryRootField": "ArticleByID",
-                  "uniqueIdentifier": [
-                    "article_id"
-                  ]
+                  "uniqueIdentifier": ["article_id"]
                 }
               ]
             },
@@ -618,11 +610,7 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "article_id",
-                    "title",
-                    "author_id"
-                  ]
+                  "allowedFields": ["article_id", "title", "author_id"]
                 }
               }
             ]
@@ -647,7 +635,7 @@
           "kind": "Relationship",
           "version": "v1",
           "definition": {
-            "source": "article",
+            "sourceType": "article",
             "name": "Author",
             "target": {
               "model": {

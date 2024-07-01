@@ -43,12 +43,13 @@ impl<'a> Parser<'a> {
         self.parse_nonempty_delimited_list(
             lexer::Punctuation::BraceL,
             lexer::Punctuation::BraceR,
-            |s| s.parse_selection(),
+            Parser::parse_selection,
         )
         .map(|r| r.map(|l| SelectionSet { items: l }))
     }
 
     // These 'inline' attributes contribute to about 10% improvement in parse times
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     fn parse_field(&mut self) -> super::Result<Spanning<Field>> {
         let name1 = self.parse_name()?;
@@ -84,6 +85,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     fn parse_spread(&mut self) -> super::Result<Spanning<Selection>> {
         let spread = self.parse_punctuation(lexer::Punctuation::Spread)?;
@@ -127,7 +129,7 @@ impl<'a> Parser<'a> {
         self.parse_optional_nonempty_delimited_list(
             lexer::Punctuation::ParenL,
             lexer::Punctuation::ParenR,
-            |s| s.parse_key_value(|r| r.parse_value()),
+            |s| s.parse_key_value(Parser::parse_value),
         )
     }
 
@@ -147,7 +149,7 @@ impl<'a> Parser<'a> {
     pub fn parse_directives(&mut self) -> super::Result<Vec<Spanning<Directive>>> {
         self.parse_list(
             |s| s.is_next_token(&lexer::Token::Punctuation(lexer::Punctuation::At)),
-            |s| s.parse_directive(),
+            Parser::parse_directive,
         )
     }
 }

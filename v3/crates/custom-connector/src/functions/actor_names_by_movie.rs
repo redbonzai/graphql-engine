@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use ndc_models;
 
 use crate::{
     query::Result,
@@ -29,7 +29,7 @@ pub(crate) fn rows(
 
     let mut actor_names_by_movie = vec![];
 
-    for (_id, actor) in state.actors.iter() {
+    for actor in state.actors.values() {
         let actor_movie_id = actor.get("movie_id").ok_or((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ndc_models::ErrorResponse {
@@ -52,7 +52,7 @@ pub(crate) fn rows(
             }),
         ))?;
         if actor_movie_id_int == movie_id_int {
-            actor_names_by_movie.push(actor_name.clone())
+            actor_names_by_movie.push(actor_name.clone());
         }
     }
     let actor_names_by_movie_value = serde_json::to_value(actor_names_by_movie).map_err(|_| {

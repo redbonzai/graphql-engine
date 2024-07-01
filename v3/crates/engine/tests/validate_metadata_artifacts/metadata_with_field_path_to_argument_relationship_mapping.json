@@ -119,9 +119,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "ActorByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -134,9 +132,7 @@
               "deletable": false,
               "uniqueness_constraints": {
                 "MovieByID": {
-                  "unique_columns": [
-                    "id"
-                  ]
+                  "unique_columns": ["id"]
                 }
               },
               "foreign_keys": {}
@@ -150,7 +146,11 @@
             "query": {
               "aggregates": {},
               "variables": {},
-              "explain": {}
+              "explain": {},
+              "nested_fields": {
+                "filter_by": {},
+                "order_by": {}
+              }
             },
             "relationships": {
               "relation_comparisons": {},
@@ -158,7 +158,7 @@
             },
             "mutation": {}
           },
-          "version": "0.1.0"
+          "version": "0.1.3"
         }
       }
     }
@@ -182,9 +182,7 @@
           "type": "String!"
         }
       ],
-      "globalIdFields": [
-        "actor_id"
-      ],
+      "globalIdFields": ["actor_id"],
       "graphql": {
         "typeName": "Actor"
       },
@@ -275,9 +273,7 @@
         "selectUniques": [
           {
             "queryRootField": "ActorByMovieId",
-            "uniqueIdentifier": [
-              "actor_id"
-            ]
+            "uniqueIdentifier": ["actor_id"]
           }
         ],
         "selectMany": {
@@ -348,7 +344,7 @@
     "kind": "Relationship",
     "version": "v1",
     "definition": {
-      "source": "actor",
+      "sourceType": "actor",
       "name": "Movies",
       "target": {
         "model": {

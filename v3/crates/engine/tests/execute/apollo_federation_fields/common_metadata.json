@@ -68,9 +68,7 @@
               "apolloFederation": {
                 "keys": [
                   {
-                    "fields": [
-                      "author_id"
-                    ]
+                    "fields": ["author_id"]
                   }
                 ]
               }
@@ -108,15 +106,13 @@
             "objectType": "author",
             "source": {
               "dataConnectorName": "db",
-              "collection": "authors"
+              "collection": "author"
             },
             "graphql": {
               "selectUniques": [
                 {
                   "queryRootField": "AuthorByID",
-                  "uniqueIdentifier": [
-                    "author_id"
-                  ]
+                  "uniqueIdentifier": ["author_id"]
                 }
               ],
               "apolloFederation": {
@@ -154,11 +150,7 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name",
-                    "last_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name", "last_name"]
                 }
               }
             ]

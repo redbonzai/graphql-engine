@@ -16,8 +16,8 @@ pub use error::*;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
-pub fn normalize_request<'s, S: schema::SchemaContext>(
-    namespace: &S::Namespace,
+pub fn normalize_request<'s, S: schema::SchemaContext, NSGet: schema::NamespacedGetter<S>>(
+    namespaced_getter: &NSGet,
     schema: &'s schema::Schema<S>,
     request: &http::Request,
 ) -> Result<normalized::Operation<'s, S>> {
@@ -59,21 +59,27 @@ pub fn normalize_request<'s, S: schema::SchemaContext>(
                     &mut fragment_path,
                     &fragments,
                     &fragment_definition.selection_set.item,
-                )?
+                )?;
             }
         }
     }
     // TODO, lots of validation cases to be handled here
     let operation_name = request.operation_name.as_ref();
     if let Some(&operation) = operations.get(&operation_name) {
-        normalize_operation(namespace, schema, &fragments, operation, &request.variables)
+        normalize_operation(
+            namespaced_getter,
+            schema,
+            &fragments,
+            operation,
+            &request.variables,
+        )
     } else if let Some(operation_name) = operation_name {
         Err(Error::OperationNotFound {
             operation_name: operation_name.clone(),
         })
     } else if operations.len() == 1 {
         normalize_operation(
-            namespace,
+            namespaced_getter,
             schema,
             &fragments,
             operations.values().next().unwrap(),
@@ -99,13 +105,13 @@ pub fn check_fragment_cycles<'q>(
                         fragment_path,
                         fragments,
                         &field_selection_set.item,
-                    )?
+                    )?;
                 }
             }
             executable::Selection::FragmentSpread(spread) => {
                 let fragment_name = &spread.fragment_name.item;
                 if fragment_path.contains(fragment_name) {
-                    let mut path = fragment_path.iter().cloned().cloned().collect::<Vec<_>>();
+                    let mut path = fragment_path.iter().copied().cloned().collect::<Vec<_>>();
                     path.push(fragment_name.clone());
                     return Err(Error::CycleDetected(path));
                 }
@@ -133,8 +139,8 @@ pub fn check_fragment_cycles<'q>(
     Ok(())
 }
 
-pub fn normalize_operation<'q, 's, S: schema::SchemaContext>(
-    namespace: &S::Namespace,
+pub fn normalize_operation<'q, 's, S: schema::SchemaContext, NSGet: schema::NamespacedGetter<S>>(
+    namespaced_getter: &NSGet,
     schema: &'s schema::Schema<S>,
     fragments: &HashMap<&'q ast::Name, &'q executable::FragmentDefinition>,
     operation: &'q executable::OperationDefinition,
@@ -190,7 +196,7 @@ pub fn normalize_operation<'q, 's, S: schema::SchemaContext>(
         .ok_or(Error::InternalSelectionRootIsNotObject)?;
 
     let normalized_selection_set = selection_set::normalize_selection_set(
-        namespace,
+        namespaced_getter,
         schema,
         fragments,
         &variables_context,

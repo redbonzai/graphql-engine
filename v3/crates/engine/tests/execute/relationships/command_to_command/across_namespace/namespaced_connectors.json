@@ -146,9 +146,7 @@
                     "type": "actor",
                     "uniqueness_constraints": {
                       "ActorByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -160,9 +158,7 @@
                     "type": "movie",
                     "uniqueness_constraints": {
                       "MovieByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -348,7 +344,7 @@
                     "name": "get_movie_by_id",
                     "description": "Get movie by ID",
                     "arguments": {
-                      "id": {
+                      "movie_id": {
                         "description": "the id of the movie to fetch",
                         "type": {
                           "type": "named",
@@ -482,7 +478,11 @@
                   "query": {
                     "aggregates": {},
                     "variables": {},
-                    "explain": {}
+                    "explain": {},
+                    "nested_fields": {
+                      "filter_by": {},
+                      "order_by": {}
+                    }
                   },
                   "relationships": {
                     "relation_comparisons": {},
@@ -490,7 +490,7 @@
                   },
                   "mutation": {}
                 },
-                "version": "0.1.0" 
+                "version": "0.1.3"
               }
             }
           }
@@ -642,9 +642,7 @@
                     "type": "actor",
                     "uniqueness_constraints": {
                       "ActorByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -656,9 +654,7 @@
                     "type": "movie",
                     "uniqueness_constraints": {
                       "MovieByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -978,7 +974,11 @@
                   "query": {
                     "aggregates": {},
                     "variables": {},
-                    "explain": {}
+                    "explain": {},
+                    "nested_fields": {
+                      "filter_by": {},
+                      "order_by": {}
+                    }
                   },
                   "relationships": {
                     "relation_comparisons": {},
@@ -986,7 +986,7 @@
                   },
                   "mutation": {}
                 },
-                "version": "0.1.0" 
+                "version": "0.1.3"
               }
             }
           }

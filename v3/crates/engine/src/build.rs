@@ -1,20 +1,18 @@
-use crate::metadata;
-use crate::schema;
-use crate::schema::GDS;
-use lang_graphql::schema as gql_schema;
-use thiserror::Error;
-
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BuildError {
     #[error("invalid metadata: {0}")]
-    InvalidMetadata(#[from] metadata::resolved::error::Error),
+    InvalidMetadata(#[from] metadata_resolve::Error),
     #[error("unable to build schema: {0}")]
     UnableToBuildSchema(#[from] schema::Error),
-    #[error("unable to encode schema: {0}")]
-    EncodingError(#[from] bincode::Error),
 }
 
-pub fn build_schema(metadata: open_dds::Metadata) -> Result<gql_schema::Schema<GDS>, BuildError> {
-    let gds = schema::GDS::new(metadata)?;
+pub fn build_schema(
+    metadata: open_dds::Metadata,
+    metadata_resolve_configuration: metadata_resolve::configuration::Configuration,
+) -> Result<lang_graphql::schema::Schema<schema::GDS>, BuildError> {
+    let resolved_metadata = metadata_resolve::resolve(metadata, metadata_resolve_configuration)?;
+    let gds = schema::GDS {
+        metadata: resolved_metadata,
+    };
     Ok(gds.build_schema()?)
 }

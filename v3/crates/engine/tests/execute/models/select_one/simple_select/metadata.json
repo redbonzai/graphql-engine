@@ -80,15 +80,13 @@
             "objectType": "author",
             "source": {
               "dataConnectorName": "db",
-              "collection": "authors"
+              "collection": "author"
             },
             "graphql": {
               "selectUniques": [
                 {
                   "queryRootField": "AuthorByID",
-                  "uniqueIdentifier": [
-                    "author_id"
-                  ]
+                  "uniqueIdentifier": ["author_id"]
                 }
               ]
             },
@@ -123,11 +121,7 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name",
-                    "last_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name", "last_name"]
                 }
               }
             ]

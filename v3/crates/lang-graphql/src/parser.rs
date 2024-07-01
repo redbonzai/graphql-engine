@@ -46,7 +46,7 @@ impl Display for Error {
                 )
             }
             Error::OtherError(msg) => {
-                write!(f, "{}", msg)
+                write!(f, "{msg}")
             }
         }
     }
@@ -237,8 +237,7 @@ impl<'a> Parser<'a> {
 
     pub fn is_next_token(&self, expected: &lexer::Token) -> bool {
         match self.peek() {
-            None => false,
-            Some(Err(_)) => false,
+            None | Some(Err(_)) => false,
             Some(Ok(token)) => token.item == *expected,
         }
     }
@@ -309,6 +308,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    #[allow(clippy::inline_always)]
     #[inline(always)]
     pub fn peek_fail(
         &self,
@@ -427,7 +427,7 @@ impl<'a> Parser<'a> {
     {
         let start = self.parse_punctuation(start_token)?;
         let mut items = vec![];
-        let end_token_ = &lexer::Token::Punctuation(end_token.clone());
+        let end_token_ = &lexer::Token::Punctuation(end_token);
         while !self.is_next_token(end_token_) {
             items.push(parse(self)?);
         }
@@ -451,7 +451,7 @@ impl<'a> Parser<'a> {
     where
         F: Fn(&mut Self) -> Result<T>,
     {
-        if self.is_next_token(&lexer::Token::Punctuation(start_token.clone())) {
+        if self.is_next_token(&lexer::Token::Punctuation(start_token)) {
             Ok(Some(self.parse_delimited_list_helper(
                 start_token,
                 end_token,

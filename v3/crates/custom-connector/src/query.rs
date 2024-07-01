@@ -5,25 +5,30 @@ use std::{
 
 use axum::{http::StatusCode, Json};
 use indexmap::IndexMap;
-use ndc_client::models as ndc_models;
+use ndc_models;
 use regex::Regex;
 use serde_json::Value;
 
 use crate::{
+    arguments::apply_arguments,
     collections::get_collection_by_name,
     state::{AppState, Row},
 };
 
 pub type Result<A> = std::result::Result<A, (StatusCode, Json<ndc_models::ErrorResponse>)>;
 
+const DEFAULT_VARIABLE_SETS: &[BTreeMap<String, Value>] = &[BTreeMap::new()];
+
 pub fn execute_query_request(
     state: &AppState,
-    request: ndc_models::QueryRequest,
+    request: &ndc_models::QueryRequest,
 ) -> Result<ndc_models::QueryResponse> {
-    let variable_sets = request.variables.unwrap_or(vec![BTreeMap::new()]);
-
+    let variable_sets: &[BTreeMap<String, Value>] = request
+        .variables
+        .as_deref()
+        .unwrap_or(DEFAULT_VARIABLE_SETS);
     let mut row_sets = vec![];
-    for variables in variable_sets.iter() {
+    for variables in variable_sets {
         let row_set = execute_query_with_variables(
             &request.collection,
             &request.arguments,
@@ -48,7 +53,7 @@ fn execute_query_with_variables(
 ) -> Result<ndc_models::RowSet> {
     let mut argument_values = BTreeMap::new();
 
-    for (argument_name, argument_value) in arguments.iter() {
+    for (argument_name, argument_value) in arguments {
         if argument_values
             .insert(
                 argument_name.clone(),
@@ -106,6 +111,7 @@ pub(crate) fn parse_object_argument<'a>(
     Ok(name_object)
 }
 
+#[derive(Clone, Copy)]
 enum Root<'a> {
     /// References to the root collection actually
     /// refer to the current row, because the path to
@@ -139,7 +145,7 @@ fn execute_query(
         None => Ok(sorted),
         Some(expr) => {
             let mut filtered: Vec<Row> = vec![];
-            for item in sorted.into_iter() {
+            for item in sorted {
                 let root = match root {
                     Root::CurrentRow => &item,
                     Root::ExplicitRow(root) => root,
@@ -166,7 +172,7 @@ fn execute_query(
         .as_ref()
         .map(|aggregates| {
             let mut row: IndexMap<String, serde_json::Value> = IndexMap::new();
-            for (aggregate_name, aggregate) in aggregates.iter() {
+            for (aggregate_name, aggregate) in aggregates {
                 row.insert(
                     aggregate_name.clone(),
                     eval_aggregate(aggregate, &paginated)?,
@@ -181,9 +187,9 @@ fn execute_query(
         .as_ref()
         .map(|fields| {
             let mut rows: Vec<IndexMap<String, ndc_models::RowFieldValue>> = vec![];
-            for item in paginated.iter() {
+            for item in &paginated {
                 let row = eval_row(fields, collection_relationships, variables, state, item)?;
-                rows.push(row)
+                rows.push(row);
             }
             Ok(rows)
         })
@@ -200,7 +206,7 @@ fn eval_row(
     item: &BTreeMap<String, Value>,
 ) -> Result<IndexMap<String, ndc_models::RowFieldValue>> {
     let mut row = IndexMap::new();
-    for (field_name, field) in fields.iter() {
+    for (field_name, field) in fields {
         row.insert(
             field_name.clone(),
             eval_field(collection_relationships, variables, state, field, item)?,
@@ -215,17 +221,25 @@ fn eval_aggregate(
 ) -> Result<serde_json::Value> {
     match aggregate {
         ndc_models::Aggregate::StarCount {} => Ok(serde_json::Value::from(paginated.len())),
-        ndc_models::Aggregate::ColumnCount { column, distinct } => {
+        ndc_models::Aggregate::ColumnCount {
+            column,
+            field_path,
+            distinct,
+        } => {
             let values = paginated
                 .iter()
                 .map(|row| {
-                    row.get(column).ok_or((
+                    let column_value = row.get(column).ok_or((
                         StatusCode::BAD_REQUEST,
                         Json(ndc_models::ErrorResponse {
                             message: "invalid column name".into(),
                             details: serde_json::Value::Null,
                         }),
-                    ))
+                    ))?;
+                    let field_path_slice = field_path
+                        .as_ref()
+                        .map_or_else(|| [].as_ref(), |p| p.as_slice());
+                    extract_nested_field(column_value, field_path_slice)
                 })
                 .collect::<Result<Vec<_>>>()?;
 
@@ -259,51 +273,177 @@ fn eval_aggregate(
                 )
             })
         }
-        ndc_models::Aggregate::SingleColumn { column, function } => {
+        ndc_models::Aggregate::SingleColumn {
+            column,
+            field_path,
+            function,
+        } => {
             let values = paginated
                 .iter()
                 .map(|row| {
-                    row.get(column).ok_or((
+                    let column_value = row.get(column).ok_or((
                         StatusCode::BAD_REQUEST,
                         Json(ndc_models::ErrorResponse {
                             message: "invalid column name".into(),
                             details: serde_json::Value::Null,
                         }),
-                    ))
+                    ))?;
+                    let field_path_slice = field_path
+                        .as_ref()
+                        .map_or_else(|| [].as_ref(), |p| p.as_slice());
+                    extract_nested_field(column_value, field_path_slice)
                 })
                 .collect::<Result<Vec<_>>>()?;
-            eval_aggregate_function(function, values)
+            eval_aggregate_function(function, &values)
         }
+    }
+}
+
+fn extract_nested_field<'a>(
+    value: &'a serde_json::Value,
+    field_path: &[String],
+) -> Result<&'a serde_json::Value> {
+    if let Some((field, remaining_field_path)) = field_path.split_first() {
+        // Short circuit on null values
+        if value.is_null() {
+            return Ok(value);
+        }
+
+        let object_value = value.as_object().ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ndc_models::ErrorResponse {
+                    message:
+                        "expected object value when extracting a nested field from a field path"
+                            .into(),
+                    details: serde_json::Value::Null,
+                }),
+            )
+        })?;
+
+        let field_value = object_value.get(field).ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ndc_models::ErrorResponse {
+                    message: format!("could not find field {field} in nested object"),
+                    details: serde_json::Value::Null,
+                }),
+            )
+        })?;
+
+        extract_nested_field(field_value, remaining_field_path)
+    } else {
+        Ok(value)
     }
 }
 
 fn eval_aggregate_function(
     function: &str,
-    values: Vec<&serde_json::Value>,
+    values: &[&serde_json::Value],
 ) -> Result<serde_json::Value> {
-    let int_values = values
-        .iter()
-        .map(|value| {
-            value.as_i64().ok_or((
-                StatusCode::BAD_REQUEST,
+    if let Some((first_value, _)) = values.split_first() {
+        if first_value.is_i64() {
+            eval_aggregate_function_i64(function, values)
+        } else if first_value.is_string() {
+            eval_aggregate_function_string(function, values)
+        } else {
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ndc_models::ErrorResponse {
-                    message: "column is not an integer".into(),
+                    message: "Can only aggregate over i64 or string values".into(),
                     details: serde_json::Value::Null,
                 }),
             ))
+        }
+    } else {
+        // This is a bit of a hack, as technically what this value is should be dependent
+        // on what type the aggregate function operand is, but it is valid while we only
+        // support min and max aggregate functions.
+        Ok(serde_json::Value::Null)
+    }
+}
+
+fn eval_aggregate_function_i64(
+    function: &str,
+    values: &[&serde_json::Value],
+) -> Result<serde_json::Value> {
+    let int_values = values
+        .iter()
+        .filter_map(|value| {
+            if value.is_null() {
+                None
+            } else {
+                Some(value.as_i64().ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ndc_models::ErrorResponse {
+                            message: "aggregate value is not an integer".into(),
+                            details: (*value).clone(),
+                        }),
+                    )
+                }))
+            }
         })
         .collect::<Result<Vec<_>>>()?;
+
     let agg_value = match function {
-        "min" => Ok(int_values.iter().min()),
-        "max" => Ok(int_values.iter().max()),
+        "min" => Ok(int_values.into_iter().min()),
+        "max" => Ok(int_values.into_iter().max()),
         _ => Err((
             StatusCode::BAD_REQUEST,
             Json(ndc_models::ErrorResponse {
-                message: "invalid aggregation function".into(),
-                details: serde_json::Value::Null,
+                message: "invalid integer aggregation function".into(),
+                details: Value::String(function.to_string()),
             }),
         )),
     }?;
+
+    serde_json::to_value(agg_value).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ndc_models::ErrorResponse {
+                message: " ".into(),
+                details: serde_json::Value::Null,
+            }),
+        )
+    })
+}
+
+fn eval_aggregate_function_string(
+    function: &str,
+    values: &[&serde_json::Value],
+) -> Result<serde_json::Value> {
+    let str_values = values
+        .iter()
+        .filter_map(|value| {
+            if value.is_null() {
+                None
+            } else {
+                Some(value.as_str().ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ndc_models::ErrorResponse {
+                            message: "aggregate value is not a string".into(),
+                            details: (*value).clone(),
+                        }),
+                    )
+                }))
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let agg_value = match function {
+        "min" => Ok(str_values.into_iter().min()),
+        "max" => Ok(str_values.into_iter().max()),
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            Json(ndc_models::ErrorResponse {
+                message: "invalid string aggregation function".into(),
+                details: Value::String(function.to_string()),
+            }),
+        )),
+    }?;
+
     serde_json::to_value(agg_value).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -326,9 +466,9 @@ fn sort(
         None => Ok(collection),
         Some(order_by) => {
             let mut copy = vec![];
-            for item_to_insert in collection.into_iter() {
+            for item_to_insert in collection {
                 let mut index = 0;
-                for other in copy.iter() {
+                for other in &copy {
                     if let Ordering::Greater = eval_order_by(
                         collection_relationships,
                         variables,
@@ -338,9 +478,8 @@ fn sort(
                         &item_to_insert,
                     )? {
                         break;
-                    } else {
-                        index += 1;
                     }
+                    index += 1;
                 }
                 copy.insert(index, item_to_insert);
             }
@@ -371,7 +510,7 @@ fn eval_order_by(
 ) -> Result<Ordering> {
     let mut result = Ordering::Equal;
 
-    for element in order_by.elements.iter() {
+    for element in &order_by.elements {
         let v1 = eval_order_by_element(collection_relationships, variables, state, element, t1)?;
         let v2 = eval_order_by_element(collection_relationships, variables, state, element, t2)?;
         let x = match element.order_direction {
@@ -416,12 +555,23 @@ fn eval_order_by_element(
     element: &ndc_models::OrderByElement,
     item: &Row,
 ) -> Result<serde_json::Value> {
-    match element.target.clone() {
-        ndc_models::OrderByTarget::Column { name, path } => {
-            eval_order_by_column(collection_relationships, variables, state, item, path, name)
-        }
+    match &element.target {
+        ndc_models::OrderByTarget::Column {
+            name,
+            field_path,
+            path,
+        } => eval_order_by_column(
+            collection_relationships,
+            variables,
+            state,
+            item,
+            path,
+            name,
+            field_path,
+        ),
         ndc_models::OrderByTarget::SingleColumnAggregate {
             column,
+            field_path: _,
             function,
             path,
         } => eval_order_by_single_column_aggregate(
@@ -433,13 +583,15 @@ fn eval_order_by_element(
             column,
             function,
         ),
-        ndc_models::OrderByTarget::StarCountAggregate { path } => eval_order_by_star_count_aggregate(
-            collection_relationships,
-            variables,
-            state,
-            item,
-            path,
-        ),
+        ndc_models::OrderByTarget::StarCountAggregate { path } => {
+            eval_order_by_star_count_aggregate(
+                collection_relationships,
+                variables,
+                state,
+                item,
+                path,
+            )
+        }
     }
 }
 
@@ -448,9 +600,9 @@ fn eval_order_by_star_count_aggregate(
     variables: &BTreeMap<String, serde_json::Value>,
     state: &AppState,
     item: &BTreeMap<String, serde_json::Value>,
-    path: Vec<ndc_models::PathElement>,
+    path: &[ndc_models::PathElement],
 ) -> Result<serde_json::Value> {
-    let rows: Vec<Row> = eval_path(collection_relationships, variables, state, &path, item)?;
+    let rows: Vec<Row> = eval_path(collection_relationships, variables, state, path, item)?;
     Ok(rows.len().into())
 }
 
@@ -459,15 +611,15 @@ fn eval_order_by_single_column_aggregate(
     variables: &BTreeMap<String, serde_json::Value>,
     state: &AppState,
     item: &BTreeMap<String, serde_json::Value>,
-    path: Vec<ndc_models::PathElement>,
-    column: String,
-    function: String,
+    path: &[ndc_models::PathElement],
+    column: &str,
+    function: &str,
 ) -> Result<serde_json::Value> {
-    let rows: Vec<Row> = eval_path(collection_relationships, variables, state, &path, item)?;
+    let rows: Vec<Row> = eval_path(collection_relationships, variables, state, path, item)?;
     let values = rows
         .iter()
         .map(|row| {
-            row.get(column.as_str()).ok_or((
+            row.get(column).ok_or((
                 StatusCode::BAD_REQUEST,
                 Json(ndc_models::ErrorResponse {
                     message: "invalid column name".into(),
@@ -476,7 +628,7 @@ fn eval_order_by_single_column_aggregate(
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    eval_aggregate_function(&function, values)
+    eval_aggregate_function(function, &values)
 }
 
 fn eval_order_by_column(
@@ -484,10 +636,11 @@ fn eval_order_by_column(
     variables: &BTreeMap<String, serde_json::Value>,
     state: &AppState,
     item: &BTreeMap<String, serde_json::Value>,
-    path: Vec<ndc_models::PathElement>,
-    name: String,
+    path: &[ndc_models::PathElement],
+    name: &str,
+    field_path: &Option<Vec<String>>,
 ) -> Result<serde_json::Value> {
-    let rows: Vec<Row> = eval_path(collection_relationships, variables, state, &path, item)?;
+    let rows: Vec<Row> = eval_path(collection_relationships, variables, state, path, item)?;
     if rows.len() > 1 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -498,7 +651,7 @@ fn eval_order_by_column(
         ));
     }
     match rows.first() {
-        Some(row) => eval_column(row, name.as_str()),
+        Some(row) => eval_column_field_path(row, name, field_path),
         None => Ok(serde_json::Value::Null),
     }
 }
@@ -512,7 +665,7 @@ fn eval_path(
 ) -> Result<Vec<Row>> {
     let mut result: Vec<Row> = vec![item.clone()];
 
-    for path_element in path.iter() {
+    for path_element in path {
         let relationship_name = path_element.relationship.as_str();
         let relationship = collection_relationships.get(relationship_name).ok_or((
             StatusCode::BAD_REQUEST,
@@ -563,10 +716,10 @@ fn eval_path_element(
     // should consist of all object relationships, and possibly terminated by a
     // single array relationship, so there should be no double counting.
 
-    for src_row in source.iter() {
+    for src_row in source {
         let mut all_arguments = BTreeMap::new();
 
-        for (argument_name, argument_value) in relationship.arguments.iter() {
+        for (argument_name, argument_value) in &relationship.arguments {
             if all_arguments
                 .insert(
                     argument_name.clone(),
@@ -584,7 +737,7 @@ fn eval_path_element(
             }
         }
 
-        for (argument_name, argument_value) in arguments.iter() {
+        for (argument_name, argument_value) in arguments {
             if all_arguments
                 .insert(
                     argument_name.clone(),
@@ -608,7 +761,7 @@ fn eval_path_element(
             state,
         )?;
 
-        for tgt_row in target.iter() {
+        for tgt_row in &target {
             if let Some(predicate) = predicate {
                 if eval_column_mapping(relationship, src_row, tgt_row)?
                     && eval_expression(
@@ -687,7 +840,7 @@ fn eval_expression(
 ) -> Result<bool> {
     match expr {
         ndc_models::Expression::And { expressions } => {
-            for expr in expressions.iter() {
+            for expr in expressions {
                 if !eval_expression(collection_relationships, variables, state, expr, root, item)? {
                     return Ok(false);
                 }
@@ -695,7 +848,7 @@ fn eval_expression(
             Ok(true)
         }
         ndc_models::Expression::Or { expressions } => {
-            for expr in expressions.iter() {
+            for expr in expressions {
                 if eval_expression(collection_relationships, variables, state, expr, root, item)? {
                     return Ok(true);
                 }
@@ -724,7 +877,7 @@ fn eval_expression(
                     root,
                     item,
                 )?;
-                Ok(vals.iter().any(|val| val.is_null()))
+                Ok(vals.iter().any(serde_json::Value::is_null))
             }
         },
 
@@ -750,8 +903,8 @@ fn eval_expression(
                     root,
                     item,
                 )?;
-                for left_val in left_vals.iter() {
-                    for right_val in right_vals.iter() {
+                for left_val in &left_vals {
+                    for right_val in &right_vals {
                         if left_val == right_val {
                             return Ok(true);
                         }
@@ -777,8 +930,8 @@ fn eval_expression(
                     root,
                     item,
                 )?;
-                for column_val in column_vals.iter() {
-                    for regex_val in regex_vals.iter() {
+                for column_val in &column_vals {
+                    for regex_val in &regex_vals {
                         let column_str = column_val.as_str().ok_or((
                             StatusCode::BAD_REQUEST,
                             Json(ndc_models::ErrorResponse {
@@ -911,19 +1064,45 @@ fn eval_comparison_target(
     item: &Row,
 ) -> Result<Vec<serde_json::Value>> {
     match target {
-        ndc_models::ComparisonTarget::Column { name, path } => {
+        ndc_models::ComparisonTarget::Column {
+            name,
+            field_path,
+            path,
+        } => {
             let rows = eval_path(collection_relationships, variables, state, path, item)?;
             let mut values = vec![];
-            for row in rows.iter() {
-                let value = eval_column(row, name.as_str())?;
+            for row in &rows {
+                let value = eval_column_field_path(row, name.as_str(), field_path)?;
                 values.push(value);
             }
             Ok(values)
         }
-        ndc_models::ComparisonTarget::RootCollectionColumn { name } => {
-            let value = eval_column(root, name.as_str())?;
+        ndc_models::ComparisonTarget::RootCollectionColumn { name, field_path } => {
+            let value = eval_column_field_path(root, name.as_str(), field_path)?;
             Ok(vec![value])
         }
+    }
+}
+
+fn eval_column_field_path(
+    row: &Row,
+    column_name: &str,
+    field_path: &Option<Vec<String>>,
+) -> Result<serde_json::Value> {
+    let column_value = eval_column(row, column_name)?;
+    match field_path {
+        None => Ok(column_value),
+        Some(path) => path
+            .iter()
+            .try_fold(&column_value, |value, field_name| value.get(field_name))
+            .cloned()
+            .ok_or((
+                StatusCode::BAD_REQUEST,
+                Json(ndc_models::ErrorResponse {
+                    message: "invalid field path".into(),
+                    details: serde_json::Value::Null,
+                }),
+            )),
     }
 }
 
@@ -999,8 +1178,8 @@ pub(crate) fn eval_nested_field(
                 state,
                 &full_row,
             )?;
-            Ok(ndc_models::RowFieldValue(serde_json::to_value(row).map_err(
-                |_| {
+            Ok(ndc_models::RowFieldValue(
+                serde_json::to_value(row).map_err(|_| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(ndc_models::ErrorResponse {
@@ -1008,8 +1187,8 @@ pub(crate) fn eval_nested_field(
                             details: serde_json::Value::Null,
                         }),
                     )
-                },
-            )?))
+                })?,
+            ))
         }
         ndc_models::NestedField::Array(ndc_models::NestedArray { fields }) => {
             let array: Vec<serde_json::Value> = serde_json::from_value(value).map_err(|_| {
@@ -1050,9 +1229,13 @@ fn eval_field(
     item: &Row,
 ) -> Result<ndc_models::RowFieldValue> {
     match field {
-        ndc_models::Field::Column { column, fields } => {
+        ndc_models::Field::Column {
+            column,
+            fields,
+            arguments,
+        } => {
             let col_val = eval_column(item, column.as_str())?;
-            match fields {
+            let result = match fields {
                 None => Ok(ndc_models::RowFieldValue(col_val)),
                 Some(nested_field) => eval_nested_field(
                     collection_relationships,
@@ -1061,7 +1244,8 @@ fn eval_field(
                     col_val,
                     nested_field,
                 ),
-            }
+            }?;
+            apply_arguments(result, arguments, variables)
         }
         ndc_models::Field::Relationship {
             relationship,
@@ -1114,7 +1298,7 @@ fn eval_column_mapping(
     src_row: &Row,
     tgt_row: &Row,
 ) -> Result<bool> {
-    for (src_column, tgt_column) in relationship.column_mapping.iter() {
+    for (src_column, tgt_column) in &relationship.column_mapping {
         let src_value = eval_column(src_row, src_column)?;
         let tgt_value = eval_column(tgt_row, tgt_column)?;
         if src_value != tgt_value {

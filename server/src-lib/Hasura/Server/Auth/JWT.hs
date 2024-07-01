@@ -341,12 +341,13 @@ instance J.ToJSON HasuraClaims where
 -- IORef
 fetchAndUpdateJWKs ::
   (MonadIO m, MonadBaseControl IO m) =>
+  ContextAdvice ->
   Logger Hasura ->
   HTTP.Manager ->
   URI ->
   IORef (Jose.JWKSet, Maybe UTCTime) ->
   m ()
-fetchAndUpdateJWKs logger httpManager url jwkRef = do
+fetchAndUpdateJWKs contextAdvice logger httpManager url jwkRef = do
   res <- runExceptT $ fetchJwk logger httpManager url
   case res of
     -- As this 'fetchJwk' is going to happen always in background thread, we are
@@ -371,7 +372,7 @@ fetchAndUpdateJWKs logger httpManager url jwkRef = do
         Just expiryTime -> liftIO $ writeIORef jwkRef (jwkSet, Just expiryTime)
   where
     logNotice = do
-      let err = JwkRefreshLog LevelInfo (Just "Either the expiry is not present or cannot be parsed (retrying again after 1 second)") Nothing
+      let err = JwkRefreshLog LevelInfo (Just $ "Either the expiry is not present or cannot be parsed (" <> getContextAdvice contextAdvice <> ")") Nothing
       liftIO $ unLogger logger err
 
 -- | Given a JWK url, fetch JWK from it
@@ -386,7 +387,7 @@ fetchJwk ::
   m (Jose.JWKSet, ResponseHeaders)
 fetchJwk (Logger logger) manager url = do
   let urlT = tshow url
-      infoMsg = "refreshing JWK from endpoint: " <> urlT
+      infoMsg = "Refreshing JWK from endpoint: " <> urlT
   liftIO $ logger $ JwkRefreshLog LevelInfo (Just infoMsg) Nothing
   res <- try $ do
     req <- liftIO $ HTTP.mkRequestThrow $ tshow url

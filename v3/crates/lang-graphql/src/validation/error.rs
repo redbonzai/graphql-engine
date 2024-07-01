@@ -36,12 +36,6 @@ pub enum Error {
         type_name: ast::TypeName,
         field_name: ast::Name,
     },
-    #[error("field {field_name} on type {type_name} is not allowed for {namespace}")]
-    FieldNotAccessible {
-        namespace: String,
-        type_name: ast::TypeName,
-        field_name: ast::Name,
-    },
     #[error("no such type defined in the document: {0}")]
     UnknownType(ast::TypeName),
     #[error("an internal error occured during validation: type lookup failed for {type_name}")]
@@ -86,12 +80,6 @@ pub enum Error {
         type_name: ast::TypeName,
         field_name: ast::Name,
     },
-    #[error("the {field_name} on type {type_name} is not accessible for {namespace}")]
-    InputFieldNotAccessible {
-        namespace: String,
-        type_name: ast::TypeName,
-        field_name: ast::Name,
-    },
     #[error("the required fields {} on type {type_name} are not found", field_names.iter().fold(String::new(), |acc, name| acc + &name.to_string()))]
     RequiredInputFieldsNotFound {
         type_name: ast::TypeName,
@@ -104,12 +92,6 @@ pub enum Error {
     },
     #[error("the enum value {enum_value} on type {type_name} is not found")]
     EnumValueNotFound {
-        type_name: ast::TypeName,
-        enum_value: ast::Name,
-    },
-    #[error("the enum value {enum_value} of type {type_name} is not accessible to {namespace}")]
-    EnumValueNotAccessible {
-        namespace: String,
         type_name: ast::TypeName,
         enum_value: ast::Name,
     },
@@ -151,18 +133,17 @@ pub enum Error {
     OperationNotFound { operation_name: ast::Name },
     #[error("no anonymous operation found in the document")]
     AnonymousOperationNotFound,
-    #[error("expected arguments '{}' on field {field_name} of type {type_name} are not found", argument_names.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", "))]
+    #[error("expected arguments '{}' on field {field_name} of type {type_name} are not found", argument_names.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "))]
     ArgumentsNotFound {
         type_name: ast::TypeName,
         field_name: ast::Name,
         argument_names: Vec<ast::Name>,
     },
-    #[error("argument {argument_name} on field {field_name} of type {type_name} is not allowed for {namespace}")]
-    ArgumentNotAllowed {
+    #[error("argument {argument_name} on field {field_name} of type {type_name} not found")]
+    ArgumentNotFound {
         type_name: ast::TypeName,
         field_name: ast::Name,
         argument_name: ast::Name,
-        namespace: String,
     },
     #[error("argument {argument_name} on field {field_name} of type {type_name} is defined more than once")]
     DuplicateArguments {
@@ -180,6 +161,4 @@ pub enum Error {
     },
     #[error("no fields are selected")]
     FieldSelectionSetIsEmpty,
-    #[error("order_by expects a list of input objects with exactly one key-value pair per input object. Please split the input object with multiple key-value pairs into a list of single key-value pair objects.")]
-    OrderByObjectShouldExactlyHaveOneKeyValuePair,
 }

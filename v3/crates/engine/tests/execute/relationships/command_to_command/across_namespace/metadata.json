@@ -81,20 +81,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "movie_id",
-                    "title",
-                    "rating"
-                  ]
+                  "allowedFields": ["movie_id", "title", "rating"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "movie_id",
-                    "title"
-                  ]
+                  "allowedFields": ["movie_id", "title"]
                 }
               }
             ]
@@ -124,7 +117,7 @@
             "name": "get_movie_by_id",
             "arguments": [
               {
-                "name": "movie_id",
+                "name": "target_argument_movie_id",
                 "type": "Int!"
               }
             ],
@@ -135,7 +128,7 @@
                 "function": "get_movie_by_id"
               },
               "argumentMapping": {
-                "movie_id": "id"
+                "target_argument_movie_id": "movie_id"
               }
             },
             "graphql": {
@@ -226,21 +219,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "actor_id",
-                    "name",
-                    "movie_id"
-                  ]
+                  "allowedFields": ["actor_id", "name", "movie_id"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "actor_id",
-                    "name",
-                    "movie_id"
-                  ]
+                  "allowedFields": ["actor_id", "name", "movie_id"]
                 }
               }
             ]
@@ -284,7 +269,7 @@
         },
         {
           "definition": {
-            "source": "commandActor",
+            "sourceType": "commandActor",
             "name": "MovieFromActor",
             "target": {
               "command": {
@@ -303,7 +288,7 @@
                 },
                 "target": {
                   "argument": {
-                    "argumentName": "movie_id"
+                    "argumentName": "target_argument_movie_id"
                   }
                 }
               }

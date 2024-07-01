@@ -129,9 +129,7 @@
                     "deletable": false,
                     "uniqueness_constraints": {
                       "ActorByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -144,9 +142,7 @@
                     "deletable": false,
                     "uniqueness_constraints": {
                       "MovieByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -289,12 +285,15 @@
                 ]
               },
               "capabilities": {
-                "version": "0.1.0",
+                "version": "0.1.3",
                 "capabilities": {
                   "query": {
                     "aggregates": {},
                     "variables": {},
-                    "explain": {}
+                    "nested_fields": {
+                      "filter_by": {},
+                      "order_by": {}
+                    }
                   },
                   "relationships": {
                     "relation_comparisons": {},
@@ -421,21 +420,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "movie_id",
-                    "title",
-                    "rating"
-                  ]
+                  "allowedFields": ["movie_id", "title", "rating"]
                 }
               },
               {
                 "role": "user_1",
                 "output": {
-                  "allowedFields": [
-                    "movie_id",
-                    "title",
-                    "rating"
-                  ]
+                  "allowedFields": ["movie_id", "title", "rating"]
                 }
               }
             ]
@@ -512,21 +503,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "actor_id",
-                    "name",
-                    "movie_id"
-                  ]
+                  "allowedFields": ["actor_id", "name", "movie_id"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "actor_id",
-                    "name",
-                    "movie_id"
-                  ]
+                  "allowedFields": ["actor_id", "name", "movie_id"]
                 }
               }
             ]
@@ -580,7 +563,7 @@
           "kind": "Relationship",
           "version": "v1",
           "definition": {
-            "source": "commandActor",
+            "sourceType": "commandActor",
             "name": "Movies",
             "target": {
               "model": {
@@ -615,7 +598,7 @@
             "name": "db",
             "url": {
               "singleUrl": {
-                "value": "http://postgres_connector:8100"
+                "value": "http://postgres_connector:8080"
               }
             },
             "headers": {},
@@ -780,31 +763,27 @@
                 },
                 "collections": [
                   {
-                    "name": "articles",
+                    "name": "article",
                     "description": "A collection of articles",
                     "arguments": {},
                     "type": "article",
                     "deletable": false,
                     "uniqueness_constraints": {
                       "ArticleByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
                   },
                   {
-                    "name": "authors",
+                    "name": "author",
                     "description": "A collection of authors",
                     "arguments": {},
                     "type": "author",
                     "deletable": false,
                     "uniqueness_constraints": {
                       "AuthorByID": {
-                        "unique_columns": [
-                          "id"
-                        ]
+                        "unique_columns": ["id"]
                       }
                     },
                     "foreign_keys": {}
@@ -973,15 +952,21 @@
                   "query": {
                     "aggregates": {},
                     "variables": {},
-                    "explain": {}
+                    "explain": {},
+                    "nested_fields": {
+                      "filter_by": {},
+                      "order_by": {}
+                    }
                   },
                   "relationships": {
                     "relation_comparisons": {},
                     "order_by_aggregate": {}
                   },
-                  "mutation": {}
+                  "mutation": {
+                    "explain": {}
+                  }
                 },
-                "version": "0.1.0"
+                "version": "0.1.3"
               }
             }
           }
@@ -1051,15 +1036,13 @@
             "objectType": "author",
             "source": {
               "dataConnectorName": "db",
-              "collection": "authors"
+              "collection": "author"
             },
             "graphql": {
               "selectUniques": [
                 {
                   "queryRootField": "AuthorByID",
-                  "uniqueIdentifier": [
-                    "author_id"
-                  ]
+                  "uniqueIdentifier": ["author_id"]
                 }
               ],
               "selectMany": {
@@ -1098,10 +1081,7 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name"]
                 }
               }
             ]
