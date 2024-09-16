@@ -29,7 +29,7 @@ recursion_limit_macro = { path = "../recursion_limit_macro" }
 axum = "0.6.20"
 http = "0.2.9"
 indexmap = { version = "2", features = ["serde"] }
-lexical-core = "0.8"
+lexical-core = "1.0"
 nonempty = { version = "0.8", features = ["serialize"] }
 schemars = { version = "0.8.12", features = ["smol_str"] }
 serde = "1.0.152"
