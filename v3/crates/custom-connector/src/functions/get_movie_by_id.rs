@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use axum::{Json, http::StatusCode};
+use ndc_models;
 
 use crate::{
+    arguments::{check_all_arguments_used, parse_i32_argument},
     query::Result,
     state::{AppState, Row},
 };
@@ -28,45 +29,35 @@ pub(crate) fn function_info() -> ndc_models::FunctionInfo {
 }
 
 pub(crate) fn rows(
-    arguments: &BTreeMap<String, serde_json::Value>,
+    arguments: &BTreeMap<ndc_models::ArgumentName, serde_json::Value>,
     state: &AppState,
 ) -> Result<Vec<Row>> {
-    let id_value = arguments.get("movie_id").ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(ndc_models::ErrorResponse {
-            message: "missing argument movie_id".into(),
-            details: serde_json::Value::Null,
-        }),
-    ))?;
-    if let Some(id) = id_value.as_i64() {
-        let movie = state.movies.get(&id);
+    let mut arguments = arguments
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect::<BTreeMap<_, _>>();
+    let id = parse_i32_argument("movie_id", &mut arguments)?;
+    check_all_arguments_used(&arguments)?;
 
-        match movie {
-            None => Ok(vec![BTreeMap::from_iter([(
-                "__value".into(),
-                serde_json::Value::Null,
-            )])]),
-            Some(movie) => {
-                let movie_value = serde_json::to_value(movie).map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ndc_models::ErrorResponse {
-                            message: "unable to encode value".into(),
-                            details: serde_json::Value::Null,
-                        }),
-                    )
-                })?;
+    let movie = state.movies.get(&id);
 
-                Ok(vec![BTreeMap::from_iter([("__value".into(), movie_value)])])
-            }
+    match movie {
+        None => Ok(vec![BTreeMap::from_iter([(
+            "__value".into(),
+            serde_json::Value::Null,
+        )])]),
+        Some(movie) => {
+            let movie_value = serde_json::to_value(movie).map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ndc_models::ErrorResponse {
+                        message: "unable to encode value".into(),
+                        details: serde_json::Value::Null,
+                    }),
+                )
+            })?;
+
+            Ok(vec![BTreeMap::from_iter([("__value".into(), movie_value)])])
         }
-    } else {
-        Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ndc_models::ErrorResponse {
-                message: "incorrect type for id".into(),
-                details: serde_json::Value::Null,
-            }),
-        ))
     }
 }

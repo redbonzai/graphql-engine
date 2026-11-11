@@ -1,21 +1,40 @@
 use std::collections::BTreeMap;
 
-use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use axum::{Json, http::StatusCode};
+use ndc_models;
 
 use crate::{
-    query::{eval_nested_field, Result},
+    arguments::check_all_arguments_used,
+    query::{Result, eval_nested_field},
     state::AppState,
 };
 
+pub(crate) fn procedure_info() -> ndc_models::ProcedureInfo {
+    ndc_models::ProcedureInfo {
+        name: "uppercase_all_actor_names".into(),
+        description: Some("Uppercase all actor names".into()),
+        arguments: BTreeMap::new(),
+        result_type: ndc_models::Type::Nullable {
+            underlying_type: Box::new(ndc_models::Type::Array {
+                element_type: Box::new(ndc_models::Type::Named {
+                    name: "actor".into(),
+                }),
+            }),
+        },
+    }
+}
+
 pub(crate) fn execute(
-    fields: &Option<ndc_models::NestedField>,
-    collection_relationships: &BTreeMap<String, ndc_models::Relationship>,
+    arguments: &BTreeMap<ndc_models::ArgumentName, serde_json::Value>,
+    fields: Option<&ndc_models::NestedField>,
+    collection_relationships: &BTreeMap<ndc_models::RelationshipName, ndc_models::Relationship>,
     state: &mut AppState,
 ) -> Result<serde_json::Value> {
+    check_all_arguments_used(arguments)?;
+
     let mut actors_list = vec![];
     let current_state = state.actors.clone();
-    for (actor_id, actor) in current_state.iter() {
+    for (actor_id, actor) in &current_state {
         let id_int = *actor_id;
         let actor_name = actor.get("name").ok_or((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -34,8 +53,7 @@ pub(crate) fn execute(
         let actor_name_uppercase = actor_name_str.to_uppercase();
         let actor_name_uppercase_value = serde_json::Value::String(actor_name_uppercase);
 
-        let old_row = actor;
-        let mut new_row = BTreeMap::from_iter(old_row.iter().map(|(k, v)| (k.clone(), v.clone())));
+        let mut new_row = actor.clone();
         new_row.insert("name".into(), actor_name_uppercase_value.clone());
         state.actors.insert(id_int, new_row.clone());
         let actor_json = serde_json::to_value(new_row).map_err(|_| {

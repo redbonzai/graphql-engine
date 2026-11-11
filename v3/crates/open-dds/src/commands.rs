@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::BTreeMap, ops::Deref};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -7,37 +7,13 @@ use crate::{
     arguments::{ArgumentDefinition, ArgumentName},
     data_connector::DataConnectorName,
     identifier::Identifier,
-    impl_JsonSchema_with_OpenDd_for,
-    types::{Deprecated, GraphQlFieldName, TypeReference},
+    str_newtype,
+    types::{DataConnectorArgumentName, Deprecated, GraphQlFieldName, TypeReference},
 };
 
-/// The name of a command.
-#[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    derive_more::Display,
-    opendds_derive::OpenDd,
-)]
-pub struct CommandName(pub Identifier);
-
-impl_JsonSchema_with_OpenDd_for!(CommandName);
-
-/// The name of a function backing the command.
-#[derive(
-    Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, derive_more::Display, JsonSchema,
-)]
-pub struct FunctionName(pub String);
-
-/// The name of a procedure backing the command.
-#[derive(
-    Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, derive_more::Display, JsonSchema,
-)]
-pub struct ProcedureName(pub String);
+str_newtype!(CommandName over Identifier | doc "The name of a command.");
+str_newtype!(FunctionName | doc "The name of a function backing the command.");
+str_newtype!(ProcedureName | doc "The name of a procedure backing the command.");
 
 #[derive(
     Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, JsonSchema, opendds_derive::OpenDd,
@@ -46,7 +22,9 @@ pub struct ProcedureName(pub String);
 #[schemars(title = "DataConnectorCommand")]
 pub enum DataConnectorCommand {
     #[schemars(title = "Function")]
+    /// A function as data connector command.
     Function(FunctionName),
+    /// A procedure as data connector command.
     #[schemars(title = "Procedure")]
     Procedure(ProcedureName),
 }
@@ -57,12 +35,39 @@ pub enum DataConnectorCommand {
 #[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
 #[serde(tag = "version", content = "definition")]
 #[serde(rename_all = "camelCase")]
-#[opendd(as_versioned_with_definition, json_schema(title = "Command"))]
+#[opendd(
+    as_versioned_with_definition,
+    json_schema(title = "Command", example = "Command::example")
+)]
 pub enum Command {
     V1(CommandV1),
 }
 
 impl Command {
+    fn example() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "Command",
+            "version": "v1",
+            "definition": {
+                "name": "get_latest_article",
+                "outputType": "commandArticle",
+                "arguments": [],
+                "source": {
+                    "dataConnectorName": "data_connector",
+                    "dataConnectorCommand": {
+                        "function": "latest_article"
+                    },
+                    "argumentMapping": {}
+                },
+                "graphql": {
+                    "rootFieldName": "getLatestArticle",
+                    "rootFieldKind": "Query"
+                },
+                "description": "Get the latest article",
+            }
+        })
+    }
+
     pub fn upgrade(self) -> CommandV1 {
         match self {
             Command::V1(v1) => v1,
@@ -72,7 +77,7 @@ impl Command {
 
 #[derive(Serialize, Clone, Debug, PartialEq, opendds_derive::OpenDd)]
 #[serde(rename_all = "camelCase")]
-#[opendd(json_schema(title = "CommandV1", example = "CommandV1::example"))]
+#[opendd(json_schema(title = "CommandV1"))]
 /// Definition of an OpenDD Command, which is a custom operation that can take arguments and
 /// returns an output. The semantics of a command are opaque to OpenDD.
 pub struct CommandV1 {
@@ -88,42 +93,23 @@ pub struct CommandV1 {
     /// Configuration for how this command should appear in the GraphQL schema.
     pub graphql: Option<CommandGraphQlDefinition>,
     /// The description of the command.
-    /// Gets added to the description of the command's root field in the graphql schema.
+    /// Gets added to the description of the command's root field in the GraphQL schema.
     pub description: Option<String>,
 }
 
-impl CommandV1 {
-    fn example() -> serde_json::Value {
-        serde_json::json!({
-            "name": "get_latest_article",
-            "outputType": "commandArticle",
-            "arguments": [],
-            "source": {
-                "dataConnectorName": "data_connector",
-                "dataConnectorCommand": {
-                    "function": "latest_article"
-                },
-                "argumentMapping": {}
-            },
-            "graphql": {
-                "rootFieldName": "getLatestArticle",
-                "rootFieldKind": "Query"
-            },
-            "description": "Get the latest article",
-        })
-    }
-}
-
-#[derive(Default, Serialize, opendds_derive::OpenDd, Clone, Debug, PartialEq)]
+#[derive(
+    Default, Deserialize, Serialize, opendds_derive::OpenDd, Clone, Debug, PartialEq, JsonSchema,
+)]
+#[schemars(title = "ArgumentMapping")]
 /// Mapping of a comand or model argument name to the corresponding argument name used in the data connector.
 /// The key of this object is the argument name used in the command or model and the value
 /// is the argument name used in the data connector.
 // We wrap maps into newtype structs so that we have a type and title for them in the JSONSchema which
 // makes it easier to auto-generate documentation.
-pub struct ArgumentMapping(pub HashMap<ArgumentName, String>);
+pub struct ArgumentMapping(pub BTreeMap<ArgumentName, DataConnectorArgumentName>);
 
 impl Deref for ArgumentMapping {
-    type Target = HashMap<ArgumentName, String>;
+    type Target = BTreeMap<ArgumentName, DataConnectorArgumentName>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

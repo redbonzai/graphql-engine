@@ -1,16 +1,14 @@
-import type { Metadata, OpenTelemetry } from '../../../hasura-metadata-types';
+import type { Metadata, OpenTelemetry } from '@hasura/shared/types';
 import type { FormValues } from '../../OpenTelemetry/components/Form/schema';
-
 import { defaultValues } from '../../OpenTelemetry/components/Form/schema';
-
-import {
-  formHeadersToMetadataHeaders,
-  metadataHeadersToFormHeaders,
-} from './metadataToFormConverters/metadataHeadersToFormHeaders';
 import {
   formAttributesToMetadataAttributes,
   metadataAttributesToFormAttributes,
 } from './metadataToFormConverters/metadataAttributesToFormAttributes';
+import {
+  parseHeaderConfigs,
+  transformHeaderConfigs,
+} from '@hasura/shared/utils';
 
 /**
  * Convert a metadata's OpenTelemetry configuration into its corresponding form values object.
@@ -19,20 +17,20 @@ import {
  * the type! Misalignments, if any, must be caught before calling openTelemetryToFormValues!
  */
 export function openTelemetryToFormValues(
-  openTelemetry: Metadata['metadata']['opentelemetry']
+  openTelemetry: Metadata['metadata']['opentelemetry'],
 ): FormValues {
   if (!openTelemetry) return defaultValues;
 
   return {
-    enabled: openTelemetry.status === 'enabled',
+    ...openTelemetryStatusToFormValue(openTelemetry.status),
     tracesEndpoint: openTelemetry.exporter_otlp.otlp_traces_endpoint ?? '',
     metricsEndpoint: openTelemetry.exporter_otlp.otlp_metrics_endpoint ?? '',
     logsEndpoint: openTelemetry.exporter_otlp.otlp_logs_endpoint ?? '',
-    headers: metadataHeadersToFormHeaders(openTelemetry.exporter_otlp.headers),
+    headers: parseHeaderConfigs(openTelemetry.exporter_otlp.headers),
     batchSize: openTelemetry.batch_span_processor.max_export_batch_size,
     tracesPropagators: openTelemetry.exporter_otlp.traces_propagators,
     attributes: metadataAttributesToFormAttributes(
-      openTelemetry.exporter_otlp.resource_attributes
+      openTelemetry.exporter_otlp.resource_attributes,
     ),
 
     dataType: openTelemetry.data_types,
@@ -45,7 +43,7 @@ export function openTelemetryToFormValues(
  * Convert the form values their corresponding metadata object.
  */
 export function formValuesToOpenTelemetry(
-  formValues: FormValues
+  formValues: FormValues,
 ): OpenTelemetry {
   const otlp_traces_endpoint = formValues.tracesEndpoint;
   const otlp_metrics_endpoint = formValues.metricsEndpoint;
@@ -55,11 +53,14 @@ export function formValuesToOpenTelemetry(
   // At the beginning, only one Connection Type is available
   const protocol = 'http/protobuf';
 
-  const headers = formHeadersToMetadataHeaders(formValues.headers);
+  const headers = transformHeaderConfigs(formValues.headers);
   const resource_attributes = formAttributesToMetadataAttributes(
-    formValues.attributes
+    formValues.attributes,
   );
-  const status = formValues.enabled ? 'enabled' : 'disabled';
+  const status =
+    formValues.status === 'env'
+      ? `{{${formValues.statusVariable}}}`
+      : formValues.status;
   const data_types = formValues.dataType;
 
   const ot: OpenTelemetry = {
@@ -88,4 +89,32 @@ export function formValuesToOpenTelemetry(
     ot.exporter_otlp.otlp_logs_endpoint = otlp_logs_endpoint;
   }
   return ot;
+}
+
+/**
+ * Convert the OpenTelemetry status to form value.
+ */
+function openTelemetryStatusToFormValue(
+  value: string,
+): Pick<FormValues, 'status' | 'statusVariable'> {
+  if (value === 'enabled' || value === 'disabled') {
+    return {
+      status: value,
+      statusVariable: '',
+    };
+  }
+
+  const regexp = new RegExp('{{(\\w+)}}', 'g');
+  const matches = regexp.exec(value);
+  if (matches?.length && matches.length > 1) {
+    return {
+      status: 'env',
+      statusVariable: matches[1],
+    };
+  }
+
+  return {
+    status: 'disabled',
+    statusVariable: '',
+  };
 }

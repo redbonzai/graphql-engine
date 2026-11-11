@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { requestHeadersSelectorSchema } from '../../../../../new-components/RequestHeadersSelector';
+import { requestHeadersSelectorSchema } from '@hasura/shared/ui';
 
 const endPointSchema = z.string();
 
@@ -13,7 +13,8 @@ export const formSchema = z
   .object({
     // CONNECTION TYPE
     connectionType: z.enum(['http/protobuf']),
-    enabled: z.boolean(),
+    status: z.enum(['enabled', 'disabled', 'env']),
+    statusVariable: z.string(),
 
     dataType: z.enum(['traces', 'metrics', 'logs']).array(),
     // NOTE: We enforce more specific invariants below:
@@ -49,35 +50,38 @@ export const formSchema = z
   // enforce invariant that: when export is enabled globally AND when the
   // corresponding data_type is enabled THEN a valid endpoint url is provided.
   .refine(
-    obj =>
-      obj.enabled && obj.dataType.includes('traces')
+    (obj) =>
+      ['enabled', 'env'].includes(obj.status) && obj.dataType.includes('traces')
         ? obj.tracesEndpoint
         : true,
     {
       message:
         'A valid traces endpoint must be supplied when trace export is enabled',
       path: ['tracesEndpoint'],
-    }
+    },
   )
   .refine(
-    obj =>
-      obj.enabled && obj.dataType.includes('metrics')
+    (obj) =>
+      ['enabled', 'env'].includes(obj.status) &&
+      obj.dataType.includes('metrics')
         ? obj.metricsEndpoint
         : true,
     {
       message:
         'A valid metrics endpoint must be supplied when metrics export is enabled',
       path: ['metricsEndpoint'],
-    }
+    },
   )
   .refine(
-    obj =>
-      obj.enabled && obj.dataType.includes('logs') ? obj.logsEndpoint : true,
+    (obj) =>
+      ['enabled', 'env'].includes(obj.status) && obj.dataType.includes('logs')
+        ? obj.logsEndpoint
+        : true,
     {
       message:
         'A valid logs endpoint must be supplied when logs export is enabled',
       path: ['logsEndpoint'],
-    }
+    },
   );
 
 // --------------------------------------------------
@@ -86,7 +90,8 @@ export const formSchema = z
 export type FormValues = z.infer<typeof formSchema>;
 
 export const defaultValues: FormValues = {
-  enabled: false,
+  status: 'disabled',
+  statusVariable: '',
 
   // At the time of writing, it's impossible to get a default value that satisfies the use cases.
   // localhost would not work because HGE is running inside Docker, and the OpenTelemetry host is not.

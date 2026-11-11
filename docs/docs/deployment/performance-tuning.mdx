@@ -31,52 +31,57 @@ very undersized for your system. You can read more details about the configurati
 
 ### Hasura configuration
 
-With respect to Hasura, several environment variables can be configured to tune performance.
+With respect to Hasura, several environment variables and project settings can be configured to tune performance.
 
-#### `HASURA_GRAPHQL_PG_CONNECTIONS`
+#### CPU allocation and Haskell runtime capabilities
 
-- Minimum **2** connections
-- Default value: **50**
-- Max connections: = Max connections of Postgres - 5 (keep free connections for another services, e.g PGAdmin, metrics
-  tools)
+The GraphQL Engine uses the Haskell runtime, where a _capability_ allows Haskell code to execute on one CPU core. By
+default, the runtime may use the number of processors visible on the host. In containers, this can be much larger than
+the CPU resources available to the GraphQL Engine. The engine attempts to detect cgroup CPU limits and adjust its
+capability count automatically.
 
-However, how many connections is the best setting? Of course, it depends on the Postgres server's hardware
-specifications. Moreover, too many connections doesn't mean query performance will be the highest. There are many great
-articles that analyze this deeper:
+If cgroups cannot be detected, or a cgroup has no CPU limit (for example, `cpu.max` contains `max`), the engine leaves
+the capability count unchanged. When automatic detection leaves this count greater than sixteen without a CPU limit, it
+logs a warning. Eight is a warning threshold, not a maximum supported CPU count. Too many capabilities can increase
+per-capability memory overhead, delay garbage collection, and cause gradually increasing memory usage due to 
+fragmentation that looks like a memory leak.
 
-- [https://brandur.org/postgres-connections](https://brandur.org/postgres-connections)
-- [https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing](https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing)
+To size the runtime appropriately, either:
 
-There isn't a silver bullet for all server specs. Your developer has to test and benchmark carefully for the final
-result. However, as a starting point, you can estimate with this formula, and then test around this value:
+- Configure a container CPU limit, such as Docker's `--cpus` option or Kubernetes' `resources.limits.cpu`, so the engine
+  can automatically size its capabilities when cgroup limits are detectable. A Kubernetes CPU _request_ alone does not
+  set a CPU limit.
+- Set the `GHCRTS` environment variable to `-N<number>`, replacing `<number>` with a positive integer appropriate for
+  the CPU resources available to the engine. For example, `GHCRTS="-N4"` configures four capabilities. Preserve any
+  other runtime options already set in `GHCRTS` when adding or changing `-N`.
 
-```
-connections = ((core_count * 2) + effective_spindle_count)
-```
+:::caution Balance memory usage and performance
 
-For example, if your server has a 4 Core i7 CPU and 1 hard disk, it should have a connection pool of:
-
-9 = ((4 \* 2) +1).
-
-:::tip Tip
-
-Call it 10, as a nice round number.
+Reducing the capability count can help avoid excessive memory usage and memory leak-like growth, but setting it too low
+reduces parallelism and can limit throughput or increase latency. A low container CPU limit can also cause CPU
+throttling. Benchmark representative workloads and monitor memory usage, CPU throttling, throughput, and latency before
+choosing a value. Do not use a low capability count as a substitute for investigating an actual memory leak.
 
 :::
 
+#### Connection pooling
+
+Hasura provides automatic connection pools for (PostgreSQL and MSSQL) database connections. These pools are elastic and
+will adapt based on usage and a limit you configure. You can learn more about connection pooling and how it can be
+fine-tuned to help your project's performance [here](/databases/database-config/cloud-connection-pooling.mdx).
+
 For high-transaction applications, a horizontal scale with multiple GraphQL Engine clusters is the recommended best
-practice. However, you should be aware of the total connections of all nodes. The number must be lower than the maximum
-connections of the Postgres instance.
+practice.
 
 #### `HASURA_GRAPHQL_CONNECTIONS_PER_READ_REPLICA`
 
 With Read replicas, Hasura can load balance multiple databases. However, you will need to balance connections between
-database nodes too:
+database nodes too. Currently, read-replica connections use one setting for all databases. It can't flexibly configure
+specific values for each node. Therefore, you need to be aware of the total number of connections when scaling Hasura to
+multiple nodes.
 
-- Master connections (`HASURA_GRAPHQL_PG_CONNECTIONS`) are now used for writing only. You can decrease max connections
-  lower if Hasura doesn't write much, or share connections with other Hasura nodes.
-- Currently, read-replica connections use one setting for all databases. It can't flexibly configure specific values for
-  each node. Therefore, you need to be aware of the total number of connections when scaling Hasura to multiple nodes.
+With Read replicas, Hasura can route queries and subscriptions to multiple databases. However, you will need to balance
+connections between database nodes too.
 
 #### `HASURA_GRAPHQL_LIVE_QUERIES_MULTIPLEXED_REFETCH_INTERVAL`
 
@@ -103,7 +108,7 @@ This value needs to be kept in balance. If you don't have an idea to determine w
 The Hasura GraphQL Engine binary is containerized by default, so it is easy to scale horizontally. Workloads will be
 spread across instances but may however not be spread equally. This is normal. In cases where you have many event
 triggers, consider tweaking
-[http timeout / max event processing threads per instance](https://hasura.io/docs/latest/deployment/graphql-engine-flags/reference/#serve-sub-command-flags-environment-variables)
+[http timeout / max event processing threads per instance](/deployment/graphql-engine-flags/reference.mdx#serve-sub-command-flags-environment-variables)
 to suit your needs.
 
 To calculate your total nodes, you will need to estimate the expected concurrent requests per second and benchmark the
@@ -129,21 +134,13 @@ workloads.
 Horizontal **auto-scaling** can be set up based on CPU & memory. It's advisable to start with this, monitor it for a few
 days and see if there's a need to change based on your workload.
 
-However, you need to be aware of the total Postgres connections, too. The default `HASURA_GRAPHQL_PG_CONNECTIONS` value
-is `50`, meanwhile the default Postgres `max_connections` configuration is `100`. The Postgres server will easily be out
-of connections with `3` Hasura nodes, or `2` nodes with events/action services that connect directly to the database.
-
-```
-pg_max_connections >= hasura_nodes * hasura_pg_connections + event_nodes * event_pg_connections
-```
-
 ### Observability
 
 Observability tools help us track issues, alert us to errors, and allow us to monitor performance and hardware usage. It
 is critical in production. There are many open-source and commercial services. However, you may have to combine many
 tools because of the architectural complexity. For more information, check out our
 [observability section](/observability/overview.mdx) and our
-[observability best practives](/observability/observability-best-practices.mdx).
+[observability best practices](/observability/observability-best-practices.mdx).
 
 ## Software architecture and best practices
 

@@ -2,14 +2,14 @@
   "version": "v2",
   "subgraphs": [
     {
-      "name": "author_namespace",
+      "name": "connector_1",
       "objects": [
         {
           "kind": "DataConnectorScalarRepresentation",
           "version": "v1",
           "definition": {
             "dataConnectorName": "db",
-            "dataConnectorScalarType": "String",
+            "dataConnectorScalarType": "text",
             "representation": "String",
             "graphql": {
               "comparisonExpressionTypeName": "String_Comparison_Exp_2"
@@ -21,7 +21,7 @@
           "version": "v1",
           "definition": {
             "dataConnectorName": "db",
-            "dataConnectorScalarType": "Int",
+            "dataConnectorScalarType": "int4",
             "representation": "Int"
           }
         },
@@ -80,7 +80,7 @@
             "objectType": "author",
             "source": {
               "dataConnectorName": "db",
-              "collection": "authors"
+              "collection": "author"
             },
             "orderableFields": [
               {
@@ -113,31 +113,19 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name",
-                    "last_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name", "last_name"]
                 }
               },
               {
                 "role": "user1",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name",
-                    "last_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name", "last_name"]
                 }
               },
               {
                 "role": "user2",
                 "output": {
-                  "allowedFields": [
-                    "author_id",
-                    "first_name",
-                    "last_name"
-                  ]
+                  "allowedFields": ["author_id", "first_name", "last_name"]
                 }
               }
             ]
@@ -194,14 +182,14 @@
       ]
     },
     {
-      "name": "article_namespace",
+      "name": "connector_2",
       "objects": [
         {
           "kind": "DataConnectorScalarRepresentation",
           "version": "v1",
           "definition": {
             "dataConnectorName": "db",
-            "dataConnectorScalarType": "String",
+            "dataConnectorScalarType": "text",
             "representation": "String",
             "graphql": {
               "comparisonExpressionTypeName": "String_Comparison_Exp"
@@ -213,7 +201,7 @@
           "version": "v1",
           "definition": {
             "dataConnectorName": "db",
-            "dataConnectorScalarType": "Int",
+            "dataConnectorScalarType": "int4",
             "representation": "Int"
           }
         },
@@ -236,9 +224,7 @@
                 "type": "Int!"
               }
             ],
-            "globalIdFields": [
-              "article_id"
-            ],
+            "globalIdFields": ["article_id"],
             "graphql": {
               "typeName": "Article"
             },
@@ -276,7 +262,7 @@
             "globalIdSource": true,
             "source": {
               "dataConnectorName": "db",
-              "collection": "articles"
+              "collection": "article"
             },
             "graphql": {
               "selectUniques": [],
@@ -315,30 +301,19 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "article_id",
-                    "title",
-                    "author_id"
-                  ]
+                  "allowedFields": ["article_id", "title", "author_id"]
                 }
               },
               {
                 "role": "user1",
                 "output": {
-                  "allowedFields": [
-                    "title",
-                    "author_id"
-                    
-                  ]
+                  "allowedFields": ["title", "author_id"]
                 }
               },
               {
                 "role": "user2",
                 "output": {
-                  "allowedFields": [
-                    "title",
-                    "author_id"
-                  ]
+                  "allowedFields": ["title", "author_id"]
                 }
               }
             ]
@@ -383,12 +358,12 @@
           "kind": "Relationship",
           "version": "v1",
           "definition": {
-            "source": "article",
+            "sourceType": "article",
             "name": "Author",
             "target": {
               "model": {
                 "name": "Authors",
-                "subgraph": "author_namespace",
+                "subgraph": "connector_1",
                 "relationshipType": "Object"
               }
             },

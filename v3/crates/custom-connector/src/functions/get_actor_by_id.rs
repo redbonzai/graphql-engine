@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use axum::{Json, http::StatusCode};
+use ndc_models;
 
 use crate::{
+    arguments::{check_all_arguments_used, parse_i32_argument},
     query::Result,
     state::{AppState, Row},
 };
@@ -28,45 +29,35 @@ pub(crate) fn function_info() -> ndc_models::FunctionInfo {
 }
 
 pub(crate) fn rows(
-    arguments: &BTreeMap<String, serde_json::Value>,
+    arguments: &BTreeMap<ndc_models::ArgumentName, serde_json::Value>,
     state: &AppState,
 ) -> Result<Vec<Row>> {
-    let id_value = arguments.get("id").ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(ndc_models::ErrorResponse {
-            message: "missing argument id".into(),
-            details: serde_json::Value::Null,
-        }),
-    ))?;
-    if let Some(id) = id_value.as_i64() {
-        let actor = state.actors.get(&id);
+    let mut arguments = arguments
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect::<BTreeMap<_, _>>();
+    let id = parse_i32_argument("id", &mut arguments)?;
+    check_all_arguments_used(&arguments)?;
 
-        match actor {
-            None => Ok(vec![BTreeMap::from_iter([(
-                "__value".into(),
-                serde_json::Value::Null,
-            )])]),
-            Some(actor) => {
-                let actor_value = serde_json::to_value(actor).map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ndc_models::ErrorResponse {
-                            message: "unable to encode value".into(),
-                            details: serde_json::Value::Null,
-                        }),
-                    )
-                })?;
+    let actor = state.actors.get(&id);
 
-                Ok(vec![BTreeMap::from_iter([("__value".into(), actor_value)])])
-            }
+    match actor {
+        None => Ok(vec![BTreeMap::from_iter([(
+            "__value".into(),
+            serde_json::Value::Null,
+        )])]),
+        Some(actor) => {
+            let actor_value = serde_json::to_value(actor).map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ndc_models::ErrorResponse {
+                        message: "unable to encode value".into(),
+                        details: serde_json::Value::Null,
+                    }),
+                )
+            })?;
+
+            Ok(vec![BTreeMap::from_iter([("__value".into(), actor_value)])])
         }
-    } else {
-        Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ndc_models::ErrorResponse {
-                message: "incorrect type for id".into(),
-                details: serde_json::Value::Null,
-            }),
-        ))
     }
 }

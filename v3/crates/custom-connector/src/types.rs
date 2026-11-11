@@ -1,222 +1,252 @@
-use ndc_client::models as ndc_models;
+use ndc_models;
 use std::collections::BTreeMap;
 
 pub mod actor;
+pub mod city;
+pub mod continent;
+pub mod country;
+pub mod evaluated_institution;
+pub mod genre;
+pub mod institution;
+pub mod location;
+pub mod location_pascalcase;
+pub mod login;
+pub mod movie;
 pub mod name_query;
+pub mod staff_member;
+pub mod streaming_error;
+pub mod r#where;
+pub mod where_int;
+pub mod where_string;
 
-pub(crate) fn scalar_types() -> BTreeMap<String, ndc_models::ScalarType> {
+pub(crate) fn scalar_types() -> BTreeMap<ndc_models::ScalarTypeName, ndc_models::ScalarType> {
     BTreeMap::from_iter([
         (
             "String".into(),
             ndc_models::ScalarType {
-                aggregate_functions: BTreeMap::new(),
-                comparison_operators: BTreeMap::from_iter([(
-                    "like".into(),
-                    ndc_models::ComparisonOperatorDefinition::Custom {
-                        argument_type: ndc_models::Type::Named {
-                            name: "String".into(),
+                representation: ndc_models::TypeRepresentation::String,
+                aggregate_functions: BTreeMap::from_iter([
+                    ("max".into(), ndc_models::AggregateFunctionDefinition::Max),
+                    ("min".into(), ndc_models::AggregateFunctionDefinition::Min),
+                ]),
+                comparison_operators: BTreeMap::from_iter([
+                    (
+                        "like".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
                         },
-                    },
+                    ),
+                    (
+                        "_eq".into(),
+                        ndc_models::ComparisonOperatorDefinition::Equal,
+                    ),
+                    (
+                        "starts_with".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
+                        },
+                    ),
+                    (
+                        "ends_with".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
+                        },
+                    ),
+                    (
+                        "_contains".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
+                        },
+                    ),
+                    (
+                        "istarts_with".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
+                        },
+                    ),
+                    (
+                        "iends_with".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
+                        },
+                    ),
+                    (
+                        "_icontains".into(),
+                        ndc_models::ComparisonOperatorDefinition::Custom {
+                            argument_type: ndc_models::Type::Named {
+                                name: "String".into(),
+                            },
+                        },
+                    ),
+                ]),
+                extraction_functions: BTreeMap::new(),
+            },
+        ),
+        (
+            "Date".into(),
+            ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::Date,
+                aggregate_functions: BTreeMap::from_iter([]),
+                comparison_operators: BTreeMap::from_iter([(
+                    "_eq".into(),
+                    ndc_models::ComparisonOperatorDefinition::Equal,
                 )]),
+                extraction_functions: BTreeMap::from_iter([
+                    (
+                        "year".into(),
+                        ndc_models::ExtractionFunctionDefinition::Year {
+                            result_type: ndc_models::ScalarTypeName::from("Int"),
+                        },
+                    ),
+                    (
+                        "month".into(),
+                        ndc_models::ExtractionFunctionDefinition::Month {
+                            result_type: ndc_models::ScalarTypeName::from("Int"),
+                        },
+                    ),
+                    (
+                        "day".into(),
+                        ndc_models::ExtractionFunctionDefinition::Day {
+                            result_type: ndc_models::ScalarTypeName::from("Int"),
+                        },
+                    ),
+                ]),
             },
         ),
         (
             "Int".into(),
             ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::Int32,
                 aggregate_functions: BTreeMap::from_iter([
-                    (
-                        "max".into(),
-                        ndc_models::AggregateFunctionDefinition {
-                            result_type: ndc_models::Type::Nullable {
-                                underlying_type: Box::new(ndc_models::Type::Named {
-                                    name: "Int".into(),
-                                }),
-                            },
-                        },
-                    ),
-                    (
-                        "min".into(),
-                        ndc_models::AggregateFunctionDefinition {
-                            result_type: ndc_models::Type::Nullable {
-                                underlying_type: Box::new(ndc_models::Type::Named {
-                                    name: "Int".into(),
-                                }),
-                            },
-                        },
-                    ),
+                    ("max".into(), ndc_models::AggregateFunctionDefinition::Max),
+                    ("min".into(), ndc_models::AggregateFunctionDefinition::Min),
                 ]),
-                comparison_operators: BTreeMap::from_iter([]),
+                comparison_operators: BTreeMap::from_iter([(
+                    "_eq".into(),
+                    ndc_models::ComparisonOperatorDefinition::Equal,
+                )]),
+                extraction_functions: BTreeMap::new(),
+            },
+        ),
+        (
+            "BigInt".into(),
+            ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::BigInteger,
+                aggregate_functions: BTreeMap::from_iter([
+                    ("max".into(), ndc_models::AggregateFunctionDefinition::Max),
+                    ("min".into(), ndc_models::AggregateFunctionDefinition::Min),
+                ]),
+                comparison_operators: BTreeMap::from_iter([(
+                    "_eq".into(),
+                    ndc_models::ComparisonOperatorDefinition::Equal,
+                )]),
+                extraction_functions: BTreeMap::new(),
+            },
+        ),
+        (
+            "Int64".into(),
+            ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::Int64,
+                aggregate_functions: BTreeMap::from_iter([
+                    ("max".into(), ndc_models::AggregateFunctionDefinition::Max),
+                    ("min".into(), ndc_models::AggregateFunctionDefinition::Min),
+                ]),
+                comparison_operators: BTreeMap::from_iter([(
+                    "_eq".into(),
+                    ndc_models::ComparisonOperatorDefinition::Equal,
+                )]),
+                extraction_functions: BTreeMap::new(),
+            },
+        ),
+        (
+            "Bool".into(),
+            ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::Boolean,
+                aggregate_functions: BTreeMap::new(),
+                comparison_operators: BTreeMap::from_iter([(
+                    "eq".into(),
+                    ndc_models::ComparisonOperatorDefinition::Custom {
+                        argument_type: ndc_models::Type::Named {
+                            name: "Bool".into(),
+                        },
+                    },
+                )]),
+                extraction_functions: BTreeMap::new(),
             },
         ),
         (
             "Actor_Name".into(),
             ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::String,
                 aggregate_functions: BTreeMap::new(),
                 comparison_operators: BTreeMap::new(),
+                extraction_functions: BTreeMap::new(),
+            },
+        ),
+        (
+            "HeaderMap".into(),
+            ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::JSON,
+                aggregate_functions: BTreeMap::new(),
+                comparison_operators: BTreeMap::new(),
+                extraction_functions: BTreeMap::new(),
+            },
+        ),
+        (
+            "YesNo".into(),
+            ndc_models::ScalarType {
+                representation: ndc_models::TypeRepresentation::Enum {
+                    one_of: vec!["yes".into(), "no".into()],
+                },
+                aggregate_functions: BTreeMap::new(),
+                comparison_operators: BTreeMap::new(),
+                extraction_functions: BTreeMap::new(),
             },
         ),
     ])
 }
 
-pub(crate) fn object_types() -> BTreeMap<String, ndc_models::ObjectType> {
-    let movie_type = ndc_models::ObjectType {
-        description: Some("A movie".into()),
-        fields: BTreeMap::from_iter([
-            (
-                "id".into(),
-                ndc_models::ObjectField {
-                    description: Some("The movie's primary key".into()),
-                    r#type: ndc_models::Type::Named { name: "Int".into() },
-                },
-            ),
-            (
-                "title".into(),
-                ndc_models::ObjectField {
-                    description: Some("The movie's title".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "String".into(),
-                    },
-                },
-            ),
-            (
-                "rating".into(),
-                ndc_models::ObjectField {
-                    description: Some("The movie's rating".into()),
-                    r#type: ndc_models::Type::Named { name: "Int".into() },
-                },
-            ),
-        ]),
-    };
-
-    let institution_type = ndc_models::ObjectType {
-        description: Some("An institution".into()),
-        fields: BTreeMap::from_iter([
-            (
-                "id".into(),
-                ndc_models::ObjectField {
-                    description: Some("The institution's primary key".into()),
-                    r#type: ndc_models::Type::Named { name: "Int".into() },
-                },
-            ),
-            (
-                "name".into(),
-                ndc_models::ObjectField {
-                    description: Some("The institution's name".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "String".into(),
-                    },
-                },
-            ),
-            (
-                "location".into(),
-                ndc_models::ObjectField {
-                    description: Some("The institution's location".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "location".into(),
-                    },
-                },
-            ),
-            (
-                "staff".into(),
-                ndc_models::ObjectField {
-                    description: Some("The institution's staff".into()),
-                    r#type: ndc_models::Type::Array {
-                        element_type: Box::new(ndc_models::Type::Named {
-                            name: "staff_member".into(),
-                        }),
-                    },
-                },
-            ),
-            (
-                "departments".into(),
-                ndc_models::ObjectField {
-                    description: Some("The institution's departments".into()),
-                    r#type: ndc_models::Type::Array {
-                        element_type: Box::new(ndc_models::Type::Named {
-                            name: "String".into(),
-                        }),
-                    },
-                },
-            ),
-        ]),
-    };
-
-    let location_type = ndc_models::ObjectType {
-        description: Some("A location".into()),
-        fields: BTreeMap::from_iter([
-            (
-                "city".into(),
-                ndc_models::ObjectField {
-                    description: Some("The location's city".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "String".into(),
-                    },
-                },
-            ),
-            (
-                "country".into(),
-                ndc_models::ObjectField {
-                    description: Some("The location's country".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "String".into(),
-                    },
-                },
-            ),
-            (
-                "campuses".into(),
-                ndc_models::ObjectField {
-                    description: Some("The location's campuses".into()),
-                    r#type: ndc_models::Type::Array {
-                        element_type: Box::new(ndc_models::Type::Named {
-                            name: "String".into(),
-                        }),
-                    },
-                },
-            ),
-        ]),
-    };
-
-    let staff_member_type = ndc_models::ObjectType {
-        description: Some("A staff member".into()),
-        fields: BTreeMap::from_iter([
-            (
-                "first_name".into(),
-                ndc_models::ObjectField {
-                    description: Some("The staff member's first name".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "String".into(),
-                    },
-                },
-            ),
-            (
-                "last_name".into(),
-                ndc_models::ObjectField {
-                    description: Some("The staff member's last name".into()),
-                    r#type: ndc_models::Type::Named {
-                        name: "String".into(),
-                    },
-                },
-            ),
-            (
-                "specialities".into(),
-                ndc_models::ObjectField {
-                    description: Some("The staff member's specialities".into()),
-                    r#type: ndc_models::Type::Array {
-                        element_type: Box::new(ndc_models::Type::Named {
-                            name: "String".into(),
-                        }),
-                    },
-                },
-            ),
-        ]),
-    };
-
+pub(crate) fn object_types() -> BTreeMap<ndc_models::ObjectTypeName, ndc_models::ObjectType> {
     BTreeMap::from_iter([
         ("actor".into(), actor::definition()),
-        ("movie".into(), movie_type),
+        ("city".into(), city::definition()),
+        ("country".into(), country::definition()),
+        ("continent".into(), continent::definition()),
+        (
+            "evaluated_institution".into(),
+            evaluated_institution::definition(),
+        ),
+        ("movie".into(), movie::definition()),
+        ("genre".into(), genre::definition()),
         ("name_query".into(), name_query::definition()),
-        ("institution".into(), institution_type),
-        ("location".into(), location_type),
-        ("staff_member".into(), staff_member_type),
+        ("institution".into(), institution::definition()),
+        ("location".into(), location::definition()),
+        (
+            "location_pascalcase".into(),
+            location_pascalcase::definition(),
+        ),
+        ("staff_member".into(), staff_member::definition()),
+        ("streaming_error".into(), streaming_error::definition()),
+        ("login_response".into(), login::definition_login_response()),
+        (
+            "session_response".into(),
+            login::definition_session_response(),
+        ),
+        ("session_info".into(), login::definition_session_info()),
+        ("where".into(), r#where::definition()),
+        ("where_string".into(), where_string::definition()),
+        ("where_int".into(), where_int::definition()),
     ])
 }

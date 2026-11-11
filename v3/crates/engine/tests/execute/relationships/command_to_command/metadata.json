@@ -13,21 +13,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "actor_id",
-                    "name",
-                    "movie_id"
-                  ]
+                  "allowedFields": ["actor_id", "name", "movie_id"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "actor_id",
-                    "name",
-                    "movie_id"
-                  ]
+                  "allowedFields": ["actor_id", "name", "movie_id"]
                 }
               }
             ]
@@ -42,20 +34,13 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "movie_id",
-                    "title",
-                    "rating"
-                  ]
+                  "allowedFields": ["movie_id", "title", "rating"]
                 }
               },
               {
                 "role": "user",
                 "output": {
-                  "allowedFields": [
-                    "movie_id",
-                    "title"
-                  ]
+                  "allowedFields": ["movie_id", "title"]
                 }
               }
             ]
@@ -150,8 +135,10 @@
           }
         },
         {
+          "kind": "Relationship",
+          "version": "v1",
           "definition": {
-            "source": "commandActor",
+            "sourceType": "commandActor",
             "name": "getMovieFromActor",
             "target": {
               "command": {
@@ -174,9 +161,7 @@
                 }
               }
             ]
-          },
-          "version": "v1",
-          "kind": "Relationship"
+          }
         }
       ]
     }

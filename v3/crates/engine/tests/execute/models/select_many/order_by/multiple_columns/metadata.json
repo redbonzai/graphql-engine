@@ -9,7 +9,7 @@
           "version": "v1",
           "definition": {
             "dataConnectorName": "db",
-            "dataConnectorScalarType": "String",
+            "dataConnectorScalarType": "varchar",
             "representation": "String",
             "graphql": {
               "comparisonExpressionTypeName": "String_Comparison_Exp"
@@ -21,7 +21,7 @@
           "version": "v1",
           "definition": {
             "dataConnectorName": "db",
-            "dataConnectorScalarType": "Int",
+            "dataConnectorScalarType": "int4",
             "representation": "Int",
             "graphql": {
               "comparisonExpressionTypeName": "Int_comparison"
@@ -109,6 +109,8 @@
           }
         },
         {
+          "kind": "Model",
+          "version": "v1",
           "definition": {
             "name": "Tracks",
             "objectType": "Track",
@@ -120,9 +122,7 @@
               "selectUniques": [
                 {
                   "queryRootField": "TrackByID",
-                  "uniqueIdentifier": [
-                    "TrackId"
-                  ]
+                  "uniqueIdentifier": ["TrackId"]
                 }
               ],
               "selectMany": {
@@ -151,9 +151,7 @@
                 }
               }
             ]
-          },
-          "version": "v1",
-          "kind": "Model"
+          }
         },
         {
           "kind": "TypePermissions",
@@ -164,31 +162,19 @@
               {
                 "role": "admin",
                 "output": {
-                  "allowedFields": [
-                    "TrackId",
-                    "Name",
-                    "AlbumId"
-                  ]
+                  "allowedFields": ["TrackId", "Name", "AlbumId"]
                 }
               },
               {
                 "role": "user_1",
                 "output": {
-                  "allowedFields": [
-                    "TrackId",
-                    "Name",
-                    "AlbumId"
-                  ]
+                  "allowedFields": ["TrackId", "Name", "AlbumId"]
                 }
               },
               {
                 "role": "user_2",
                 "output": {
-                  "allowedFields": [
-                    "TrackId",
-                    "Name",
-                    "AlbumId"
-                  ]
+                  "allowedFields": ["TrackId", "Name", "AlbumId"]
                 }
               }
             ]

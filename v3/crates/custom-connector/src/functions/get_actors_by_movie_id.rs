@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use axum::{http::StatusCode, Json};
-use ndc_client::models as ndc_models;
+use axum::{Json, http::StatusCode};
+use ndc_models;
 
 use crate::{
+    arguments::{check_all_arguments_used, parse_i32_argument},
     query::Result,
     state::{AppState, Row},
     types::actor::get_actor_movie_id,
@@ -29,31 +30,23 @@ pub(crate) fn function_info() -> ndc_models::FunctionInfo {
 }
 
 pub(crate) fn rows(
-    arguments: &BTreeMap<String, serde_json::Value>,
+    arguments: &BTreeMap<ndc_models::ArgumentName, serde_json::Value>,
     state: &AppState,
 ) -> Result<Vec<Row>> {
-    let movie_id = arguments.get("movie_id").ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(ndc_models::ErrorResponse {
-            message: "missing argument movie_id".into(),
-            details: serde_json::Value::Null,
-        }),
-    ))?;
-    let movie_id_int = movie_id.as_i64().ok_or((
-        StatusCode::BAD_REQUEST,
-        Json(ndc_models::ErrorResponse {
-            message: "movie_id must be a integer".into(),
-            details: serde_json::Value::Null,
-        }),
-    ))?;
+    let mut arguments = arguments
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect::<BTreeMap<_, _>>();
+    let movie_id_int = parse_i32_argument("movie_id", &mut arguments)?;
+    check_all_arguments_used(&arguments)?;
 
     let mut actors_by_movie = vec![];
 
-    for (_id, actor) in state.actors.iter() {
+    for actor in state.actors.values() {
         let actor_movie_id_int = get_actor_movie_id(actor)?;
 
         if actor_movie_id_int == movie_id_int {
-            actors_by_movie.push(actor)
+            actors_by_movie.push(actor);
         }
     }
 

@@ -159,7 +159,7 @@ def check_event_transformed(hge_ctx,
 
 
 def test_forbidden_when_admin_secret_reqd(hge_ctx, conf):
-    if conf['url'] == '/v1/graphql' or conf['url'] == '/v1beta1/relay':
+    if conf['url'] == '/v1/graphql' or conf['url'] == '/v1/relay' or conf['url'] == '/v1beta1/relay':
         if conf['status'] == 404:
             status = [404]
         else:
@@ -199,7 +199,7 @@ def test_forbidden_when_admin_secret_reqd(hge_ctx, conf):
 
 
 def test_forbidden_webhook(hge_ctx, conf):
-    if conf['url'] == '/v1/graphql' or conf['url'] == '/v1beta1/relay':
+    if conf['url'] == '/v1/graphql' or conf['url'] == '/v1/relay' or conf['url'] == '/v1beta1/relay':
         if conf['status'] == 404:
             status = [404]
         else:
@@ -295,24 +295,22 @@ def validate_gql_ws_q(hge_ctx, conf, headers, retry=False, via_subscription=Fals
 
     if endpoint == '/v1alpha1/graphql':
         ws_client = hge_ctx.ws_client_v1alpha1
-    elif endpoint == '/v1beta1/relay':
+    elif endpoint == '/v1/relay':
         ws_client = hge_ctx.ws_client_relay
+    elif endpoint == '/v1beta1/relay':
+        ws_client = hge_ctx.ws_client_relay_v1beta1
     elif gqlws: # for `graphQL-ws` clients
         ws_client = hge_ctx.ws_client_graphql_ws
     else:
         ws_client = hge_ctx.ws_client
     print(ws_client.ws_url)
+
     if not headers or len(headers) == 0:
-        ws_client.init({})
+        ws_client.init_as_admin()
+    else:
+        ws_client.init(headers)
 
-    if ws_client.remote_closed or ws_client.is_closing:
-        ws_client.create_conn()
-        if not headers or len(headers) == 0 or hge_ctx.hge_key is None:
-            ws_client.init()
-        else:
-            ws_client.init_as_admin()
-
-    query_resp = ws_client.send_query(query, query_id='hge_test', headers=headers, timeout=15)
+    query_resp = ws_client.send_query(query, query_id='hge_test', timeout=15)
     resp = next(query_resp)
     print('websocket resp: ', resp)
 
@@ -320,7 +318,7 @@ def validate_gql_ws_q(hge_ctx, conf, headers, retry=False, via_subscription=Fals
         if retry:
             #Got query complete before payload. Retry once more
             print("Got query complete before getting query response payload. Retrying")
-            ws_client.recreate_conn()
+            ws_client.tear_down()
             return validate_gql_ws_q(hge_ctx, query, headers, exp_http_response, False)
         else:
             assert resp['type'] in ['data', 'error', 'next'], resp
@@ -394,7 +392,7 @@ def validate_http_anyq_with_allowed_responses(hge_ctx, url, query, headers, exp_
             return resp_res, test_passed
         else:
             # test should fail if none of the allowed responses work
-            raise Exception("allowed_responses did not contain the response that was expected. Please check your allowed_responses")
+            raise Exception(f"allowed_responses did not contain the response that was expected. Got:\n{resp}")
     else:
         raise Exception("allowed_responses was not a list of permissible responses")
 
@@ -405,14 +403,12 @@ def validate_http_anyq_with_allowed_responses(hge_ctx, url, query, headers, exp_
 # Returns 'resp' and a bool indicating whether the test passed or not (this
 # will always be True unless we are `--accepting`)
 def assert_graphql_resp_expected(resp_orig, exp_response_orig, query, resp_hdrs={}, skip_assertion=False, exp_resp_hdrs={}):
-    print('Reponse Headers: ', resp_hdrs)
-    print(exp_resp_hdrs)
-
     # Prepare actual and expected responses so comparison takes into
     # consideration only the ordering that we care about:
     resp         = collapse_order_not_selset(resp_orig,         query)
     exp_response = collapse_order_not_selset(exp_response_orig, query)
-    matched      = equal_CommentedMap(resp, exp_response) and (exp_resp_hdrs or {}).items() <= resp_hdrs.items()
+    hdrs_matched = (exp_resp_hdrs or {}).items() <= resp_hdrs.items()
+    body_matched = equal_CommentedMap(resp, exp_response)
 
     if PytestConf.config.getoption("--accept"):
         print('skipping assertion since we chose to --accept new output')
@@ -440,8 +436,10 @@ def assert_graphql_resp_expected(resp_orig, exp_response_orig, query, resp_hdrs=
                 'diff': (stringify_keys(jsondiff.diff(exp_resp_hdrs, diff_hdrs)))
             }
         yml.dump(test_output, stream=dump_str)
-        if matched:
-            return resp, matched
+        if hdrs_matched and body_matched:
+            return resp, True
+        elif not hdrs_matched:
+            assert False, dump_str.getvalue()
         else:
             def is_err_msg(msg):
                 return any(msg.get(x) for x in ['error','errors'])
@@ -453,13 +451,13 @@ def assert_graphql_resp_expected(resp_orig, exp_response_orig, query, resp_hdrs=
                 if is_err_msg(exp) and is_err_msg(out):
                     if not matched_:
                         warnings.warn("Response does not have the expected error message\n" + dump_str.getvalue())
-                        return resp, matched
+                        return resp, matched_
                 else:
                     if skip_assertion:
                         return resp, matched_
                     else:
                         assert matched_, '\n' + dump_str.getvalue()
-    return resp, matched  # matched always True unless --accept
+    return resp, hdrs_matched and body_matched  # matched always True unless --accept
 
 # This really sucks; newer ruamel made __eq__ ignore ordering:
 #   https://bitbucket.org/ruamel/yaml/issues/326/commentedmap-equality-no-longer-takes-into
